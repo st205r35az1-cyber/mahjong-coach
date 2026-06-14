@@ -533,7 +533,75 @@
         margin-top: 7px;
       }
 
-      .opponent-analysis {
+      
+.fight-status {
+  background: linear-gradient(145deg, #233243, #15242f);
+  border: 1px solid rgb(255 255 255 / 16%);
+  border-radius: 10px;
+  color: #fff;
+  margin-bottom: 12px;
+  padding: 12px;
+}
+
+.fight-status-head {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.fight-status-head h2 {
+  font-size: 15px;
+}
+
+.fight-status-head button {
+  background: rgb(255 255 255 / 9%);
+  min-height: 32px;
+  padding: 0 10px;
+}
+
+.fight-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.fight-grid div {
+  background: rgb(255 255 255 / 9%);
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.fight-grid span {
+  color: #c8d8df;
+  display: block;
+  font-size: 11px;
+  margin-bottom: 3px;
+}
+
+.fight-grid strong {
+  display: block;
+  font-size: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fight-mission {
+  color: #fff4c7;
+  font-size: 13px;
+  line-height: 1.5;
+  margin-top: 10px;
+}
+
+@media (max-width: 560px) {
+  .fight-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.opponent-analysis {
         border-top: 1px solid rgb(37 48 59 / 18%);
         margin-top: 16px;
         padding-top: 14px;

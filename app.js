@@ -52,7 +52,16 @@ const TILE_DEFS = [
 
       const $ = (id) => document.getElementById(id);
       const tileById = Object.fromEntries(TILE_DEFS.map((tile) => [tile.id, tile]));
+      const FIGHT_RANKS = ["新人", "10級", "9級", "8級", "7級", "6級", "5級", "4級", "3級", "2級", "1級", "初段", "二段", "三段", "四段", "五段", "四神候補", "龍位候補", "龍位"];
+      const DAILY_MISSIONS = [
+        "リーチ（鳴かずにテンパイして宣言する役）で和了を目指す",
+        "タンヤオ（1・9・字牌を使わない役）候補を1回作る",
+        "相手リーチ時に現物（相手がすでに切った牌）を確認する",
+        "国士無双（1・9・字牌を13種類集める役）の気配を1回確認する",
+        "危険度が赤い牌を避けて守備する",
+      ];
       let state;
+      let fightProfile = loadFightProfile();
 
       function buildWall() {
         const wall = [];
@@ -394,6 +403,7 @@ const TILE_DEFS = [
         state.ended = true;
         state.busy = false;
         const result = calculateScore(winner, loser, method, state.hands[winner]);
+        updateFightProfileAfterRound(winner, loser, result, method);
         result.payments.forEach((delta, player) => {
           state.scores[player] += delta;
         });
@@ -449,6 +459,7 @@ const TILE_DEFS = [
         $("riichiButton").disabled = !canDeclareRiichi();
         $("message").textContent = messageOverride ?? getMessage(winning, hasYaku);
         renderAdvice();
+        renderFightProfile();
         renderOpponentAnalysis();
         renderLog();
       }
@@ -1080,6 +1091,78 @@ const TILE_DEFS = [
         return { className: "danger-safe", text: `${prefix}。${worst.reason}` };
       }
 
+      function profileStorageKey() {
+        return "mahjongCoachFightProfileV1";
+      }
+
+      function todayMissionIndex() {
+        const day = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+        const value = Number(day) || 0;
+        return value % DAILY_MISSIONS.length;
+      }
+
+      function loadFightProfile() {
+        try {
+          const stored = JSON.parse(localStorage.getItem(profileStorageKey()) || "null");
+          if (stored && typeof stored === "object") return { rankIndex: 0, orbs: 0, leaguePoint: 0, stars: 0, ...stored };
+        } catch (error) {
+          console.warn("闘牌ステータスの読み込みに失敗しました", error);
+        }
+        return { rankIndex: 0, orbs: 0, leaguePoint: 0, stars: 0 };
+      }
+
+      function saveFightProfile() {
+        try {
+          localStorage.setItem(profileStorageKey(), JSON.stringify(fightProfile));
+        } catch (error) {
+          console.warn("闘牌ステータスの保存に失敗しました", error);
+        }
+      }
+
+      function renderFightProfile() {
+        if (!$("fightRank")) return;
+        $("fightRank").textContent = FIGHT_RANKS[Math.min(fightProfile.rankIndex, FIGHT_RANKS.length - 1)];
+        $("fightOrb").textContent = fightProfile.orbs.toLocaleString("ja-JP");
+        $("fightLeague").textContent = leagueLabel(fightProfile.leaguePoint);
+        $("fightStars").textContent = fightProfile.stars.toLocaleString("ja-JP");
+        $("fightMission").textContent = `本日の課題：${DAILY_MISSIONS[todayMissionIndex()]}`;
+      }
+
+      function leagueLabel(point) {
+        if (point >= 120) return "鳳凰";
+        if (point >= 90) return "A1";
+        if (point >= 70) return "A2";
+        if (point >= 50) return "B1";
+        if (point >= 30) return "B2";
+        if (point >= 15) return "C1";
+        if (point >= 6) return "C2";
+        return "C3";
+      }
+
+      function updateFightProfileAfterRound(winner, loser, result, method) {
+        if (winner === 0) {
+          const bonus = (result.han || 1) + (result.limitName ? 3 : 0) + (method === "ツモ" ? 1 : 0);
+          fightProfile.stars += 1;
+          fightProfile.orbs += Math.max(1, bonus);
+          fightProfile.leaguePoint += Math.max(2, bonus * 2);
+          if (fightProfile.orbs >= (fightProfile.rankIndex + 1) * 3 && fightProfile.rankIndex < FIGHT_RANKS.length - 1) {
+            fightProfile.rankIndex += 1;
+            addLog(`闘牌ステータス：${FIGHT_RANKS[fightProfile.rankIndex]}に昇格しました。`);
+          }
+        } else {
+          fightProfile.leaguePoint = Math.max(0, fightProfile.leaguePoint - 2);
+          if (loser === 0) fightProfile.orbs = Math.max(0, fightProfile.orbs - 1);
+        }
+        saveFightProfile();
+      }
+
+      function resetFightProfile() {
+        fightProfile = { rankIndex: 0, orbs: 0, leaguePoint: 0, stars: 0 };
+        saveFightProfile();
+        renderFightProfile();
+        addLog("闘牌ステータスをリセットしました。");
+      }
+
       function renderLog() {
         const log = $("logList");
         log.innerHTML = "";
@@ -1612,7 +1695,7 @@ const TILE_DEFS = [
           `ドラ（ドラ牌を持っている点数ボーナス）は翻に足しますが、ドラだけでは和了役にはなりません。`,
         ].join(" ");
 
-        return { payments, displayScore, explanation, yakuText };
+        return { payments, displayScore, explanation, yakuText, han, fu: fuInfo.fu, limitName: limit.name || "" };
       }
 
       function estimateFu(hand, method) {
@@ -2013,5 +2096,6 @@ const TILE_DEFS = [
       $("applyTrainingButton")?.addEventListener("click", () => {
         setupScenario($("trainingModeSelect")?.value || "random");
       });
+      $("resetProfileButton")?.addEventListener("click", resetFightProfile);
 
       newRound();
