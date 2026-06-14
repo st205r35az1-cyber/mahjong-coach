@@ -1,0 +1,1482 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="麻雀コーチ">
+    <meta name="theme-color" content="#07352d">
+    <title>麻雀コーチ付き練習ゲーム</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: Inter, "Hiragino Sans", "Yu Gothic", Meiryo, sans-serif;
+        --felt: #10654f;
+        --felt-deep: #07352d;
+        --panel: #0b2f33;
+        --panel-2: #163c42;
+        --paper: #fff5df;
+        --paper-ink: #25303b;
+        --ink: #f7fbf3;
+        --muted: #bfd2ca;
+        --tile: #fffaf0;
+        --tile-edge: #d7c7a9;
+        --accent: #f4c95d;
+        --accent-2: #60d394;
+        --danger: #ff6b6b;
+        --blue: #2d6cdf;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background:
+          linear-gradient(135deg, rgb(255 255 255 / 5%) 0 1px, transparent 1px 14px),
+          radial-gradient(circle at center, #1b7a5f 0, var(--felt-deep) 76%);
+        color: var(--ink);
+      }
+
+      button {
+        -webkit-tap-highlight-color: transparent;
+        border: 1px solid rgb(255 255 255 / 18%);
+        border-radius: 8px;
+        background: rgb(7 38 34 / 90%);
+        color: var(--ink);
+        cursor: pointer;
+        font: inherit;
+        font-weight: 700;
+        min-height: 42px;
+        padding: 0 14px;
+        touch-action: manipulation;
+      }
+
+      button:disabled {
+        cursor: not-allowed;
+        opacity: .45;
+      }
+
+      .table {
+        display: grid;
+        gap: 14px;
+        grid-template-columns: minmax(0, 1fr);
+        min-height: 100vh;
+        padding: 16px;
+      }
+
+      .topbar,
+      .scoreboard,
+      .center,
+      .opponents,
+      .player-area,
+      .coach,
+      .log {
+        border: 1px solid rgb(255 255 255 / 12%);
+        background: rgb(6 44 40 / 72%);
+        box-shadow: 0 18px 48px rgb(0 0 0 / 22%);
+      }
+
+      .topbar {
+        align-items: center;
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 14px 16px;
+      }
+
+      h1,
+      h2,
+      h3,
+      p,
+      dl,
+      dd {
+        margin: 0;
+      }
+
+      h1 {
+        font-size: 24px;
+        letter-spacing: 0;
+        line-height: 1.15;
+      }
+
+      h2 {
+        font-size: 17px;
+        line-height: 1.25;
+      }
+
+      h3 {
+        font-size: 13px;
+        line-height: 1.3;
+      }
+
+      .topbar p {
+        color: var(--muted);
+        font-size: 13px;
+        margin-top: 5px;
+      }
+
+      .controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        justify-content: flex-end;
+      }
+
+      .riichi-button {
+        background: #7a1f2a;
+        max-width: 280px;
+        white-space: normal;
+      }
+
+      .scoreboard {
+        display: grid;
+        gap: 10px;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        padding: 10px;
+      }
+
+      .seat {
+        border-left: 4px solid rgb(255 255 255 / 18%);
+        min-width: 0;
+        padding: 8px 10px;
+      }
+
+      .seat.current {
+        border-color: var(--accent);
+      }
+
+      .seat span,
+      .wall span,
+      .name,
+      .draw-label,
+      .dora-label,
+      .mini-label {
+        color: var(--muted);
+        display: block;
+        font-size: 12px;
+      }
+
+      .seat strong,
+      .wall strong {
+        display: block;
+        font-size: 20px;
+        line-height: 1.2;
+      }
+
+      .center {
+        align-items: center;
+        display: grid;
+        gap: 14px;
+        grid-template-columns: 96px 128px 128px minmax(0, 1fr) 96px;
+        min-height: 98px;
+        padding: 12px 14px;
+      }
+
+      .dora-box,
+      .draw-box {
+        align-items: center;
+        display: grid;
+        gap: 6px;
+        grid-template-columns: auto 1fr;
+      }
+
+      .dora-box .mini-label,
+      .draw-box .mini-label {
+        grid-column: 1 / 3;
+      }
+
+      .message {
+        color: #fff9df;
+        font-size: 16px;
+        font-weight: 700;
+        line-height: 1.5;
+        min-width: 0;
+      }
+
+      .win-button {
+        background: #27539e;
+      }
+
+      .main-grid {
+        display: grid;
+        gap: 14px;
+        grid-template-columns: minmax(0, 1fr) 390px;
+      }
+
+      .board {
+        display: grid;
+        gap: 14px;
+        min-width: 0;
+      }
+
+      .opponents {
+        display: grid;
+        gap: 12px;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        min-height: 250px;
+        padding: 14px;
+      }
+
+      .opponent {
+        min-width: 0;
+      }
+
+      .concealed {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin: 8px 0 12px;
+        min-height: 44px;
+      }
+
+      .back {
+        aspect-ratio: 3 / 4;
+        background: linear-gradient(145deg, #244f89, #09264b);
+        border: 1px solid rgb(255 255 255 / 20%);
+        border-radius: 5px;
+        width: 24px;
+      }
+
+      .river {
+        align-content: start;
+        display: grid;
+        gap: 5px;
+        grid-template-columns: repeat(8, minmax(24px, 1fr));
+        min-height: 92px;
+      }
+
+      .player-area {
+        padding: 14px;
+      }
+
+      .player-river {
+        border-bottom: 1px solid rgb(255 255 255 / 12%);
+        margin-bottom: 14px;
+        padding-bottom: 14px;
+      }
+
+      .hand-row {
+        display: grid;
+        gap: 12px;
+        grid-template-columns: minmax(0, 1fr) 74px;
+      }
+
+      .hand {
+        align-items: end;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px;
+        min-height: 76px;
+      }
+
+      .drawn-slot {
+        align-items: center;
+        border-left: 1px solid rgb(255 255 255 / 14%);
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+        justify-content: end;
+        min-height: 76px;
+        padding-left: 12px;
+      }
+
+      .tile {
+        -webkit-tap-highlight-color: transparent;
+        align-items: center;
+        aspect-ratio: 3 / 4;
+        background: linear-gradient(145deg, #fffdf4, var(--tile));
+        border: 1px solid var(--tile-edge);
+        border-bottom-width: 4px;
+        border-radius: 7px;
+        box-shadow: 0 4px 0 rgb(0 0 0 / 20%);
+        color: #1d2430;
+        display: inline-flex;
+        font-family: "Apple Color Emoji", "Segoe UI Symbol", serif;
+        font-size: 34px;
+        justify-content: center;
+        line-height: 1;
+        min-width: 42px;
+        padding: 0 0 2px;
+        text-decoration: none;
+        touch-action: manipulation;
+        user-select: none;
+      }
+
+      .tile.small {
+        font-size: 24px;
+        min-width: 31px;
+      }
+
+      .tile.discarded {
+        font-size: 23px;
+        min-width: 27px;
+      }
+
+      .tile.empty {
+        background: rgb(255 255 255 / 8%);
+        border-color: rgb(255 255 255 / 14%);
+        box-shadow: none;
+        color: var(--muted);
+        font-family: inherit;
+        font-size: 12px;
+      }
+
+      .hand .tile,
+      .drawn-slot .tile {
+        transition: transform .12s ease, box-shadow .12s ease, outline-color .12s ease;
+      }
+
+      .hand .tile:hover,
+      .drawn-slot .tile:hover {
+        box-shadow: 0 8px 0 rgb(0 0 0 / 18%);
+        transform: translateY(-8px);
+      }
+
+      .tile.recommended {
+        outline: 4px solid var(--accent);
+      }
+
+      .tile.drawn {
+        outline: 3px solid var(--accent-2);
+      }
+
+      .coach {
+        align-self: start;
+        background: linear-gradient(180deg, var(--paper), #f8ead0);
+        color: var(--paper-ink);
+        max-height: calc(100vh - 194px);
+        overflow: auto;
+        padding: 16px;
+      }
+
+      .coach-header {
+        align-items: center;
+        display: flex;
+        justify-content: space-between;
+        gap: 12px;
+        margin-bottom: 12px;
+      }
+
+      .shanten-badge {
+        background: #183b56;
+        border-radius: 999px;
+        color: #fff;
+        display: inline-flex;
+        font-size: 12px;
+        font-weight: 800;
+        justify-content: center;
+        min-width: 78px;
+        padding: 6px 10px;
+      }
+
+      .recommend-card {
+        align-items: center;
+        background: #25303b;
+        border-radius: 8px;
+        color: #fff;
+        display: grid;
+        gap: 10px;
+        grid-template-columns: auto minmax(0, 1fr);
+        margin-bottom: 12px;
+        padding: 12px;
+      }
+
+      .recommend-card .tile {
+        box-shadow: none;
+        font-size: 38px;
+        min-width: 50px;
+      }
+
+      .recommend-card span {
+        color: #dfe9ef;
+        display: block;
+        font-size: 12px;
+        margin-bottom: 2px;
+      }
+
+      .recommend-card strong {
+        display: block;
+        font-size: 18px;
+        line-height: 1.25;
+      }
+
+      .advice-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .advice-item {
+        background: rgb(255 255 255 / 72%);
+        border: 1px solid rgb(37 48 59 / 12%);
+        border-radius: 8px;
+        padding: 10px 11px;
+      }
+
+      .advice-item dt {
+        color: #35505f;
+        font-size: 12px;
+        font-weight: 800;
+        margin-bottom: 4px;
+      }
+
+      .advice-item dd {
+        font-size: 14px;
+        line-height: 1.55;
+      }
+
+      .happy-tiles {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 7px;
+      }
+
+      .log {
+        padding: 14px;
+      }
+
+      .log h2 {
+        font-size: 15px;
+        margin-bottom: 10px;
+      }
+
+      .log ol {
+        color: var(--muted);
+        display: flex;
+        flex-direction: column;
+        font-size: 13px;
+        gap: 8px;
+        list-style-position: inside;
+        margin: 0;
+        max-height: 150px;
+        overflow: auto;
+        padding: 0;
+      }
+
+      .log li:first-child {
+        color: var(--ink);
+      }
+
+      @media (max-width: 1120px) {
+        .main-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .coach {
+          max-height: none;
+        }
+      }
+
+      @media (max-width: 880px) {
+        .table {
+          padding: 10px;
+        }
+
+        .topbar {
+          align-items: stretch;
+          flex-direction: column;
+        }
+
+        .controls {
+          justify-content: stretch;
+        }
+
+        .controls button {
+          flex: 1 1 150px;
+        }
+
+        .scoreboard,
+        .opponents {
+          grid-template-columns: 1fr 1fr;
+        }
+
+        .center {
+          grid-template-columns: 82px 1fr 1fr;
+        }
+
+        .message,
+        .win-button {
+          grid-column: 1 / 4;
+        }
+
+        .tile {
+          font-size: 29px;
+          min-width: 36px;
+        }
+      }
+
+      @media (max-width: 560px) {
+        .scoreboard,
+        .opponents,
+        .hand-row {
+          grid-template-columns: 1fr;
+        }
+
+        .drawn-slot {
+          align-items: flex-start;
+          border-left: 0;
+          border-top: 1px solid rgb(255 255 255 / 14%);
+          justify-content: start;
+          min-height: 0;
+          padding-left: 0;
+          padding-top: 10px;
+        }
+
+        .river {
+          grid-template-columns: repeat(6, minmax(24px, 1fr));
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="table" aria-label="麻雀コーチ付き練習ゲーム">
+      <header class="topbar">
+        <div>
+          <h1>麻雀コーチ付き練習ゲーム</h1>
+          <p id="roundText">東一局 / 親: あなた / 門前練習</p>
+        </div>
+        <div class="controls">
+          <button id="riichiButton" class="riichi-button" type="button" disabled>リーチ（鳴かずにテンパイして宣言する役）</button>
+          <button id="sortButton" type="button" title="手牌を並べ替える">整列</button>
+          <button id="newGameButton" type="button" title="新しい局を始める">新局</button>
+        </div>
+      </header>
+
+      <section class="scoreboard" aria-label="点数">
+        <article class="seat current">
+          <span>あなた</span>
+          <strong id="score0">25000</strong>
+        </article>
+        <article class="seat">
+          <span>CPU 左</span>
+          <strong id="score1">25000</strong>
+        </article>
+        <article class="seat">
+          <span>CPU 対面</span>
+          <strong id="score2">25000</strong>
+        </article>
+        <article class="seat">
+          <span>CPU 右</span>
+          <strong id="score3">25000</strong>
+        </article>
+      </section>
+
+      <section class="center">
+        <div class="wall">
+          <span>牌山</span>
+          <strong id="wallCount">82</strong>
+        </div>
+        <div class="dora-box" aria-label="ドラ表示牌">
+          <span class="mini-label">ドラ表示牌</span>
+          <span id="doraIndicator" class="tile small"></span>
+          <span id="doraText" class="dora-label"></span>
+        </div>
+        <div class="draw-box" aria-label="ツモ牌">
+          <span class="mini-label">ツモ牌</span>
+          <span id="drawTileMini" class="tile small"></span>
+          <span id="drawText" class="draw-label"></span>
+        </div>
+        <div class="message" id="message">手牌から1枚クリックして打牌してください。</div>
+        <button id="winButton" class="win-button" type="button" disabled>和了</button>
+      </section>
+
+      <div class="main-grid">
+        <div class="board">
+          <section class="opponents" aria-label="相手">
+            <article class="opponent">
+              <div class="name">CPU 左</div>
+              <div class="concealed" id="cpu1Hand"></div>
+              <div class="river" id="river1"></div>
+            </article>
+            <article class="opponent">
+              <div class="name">CPU 対面</div>
+              <div class="concealed" id="cpu2Hand"></div>
+              <div class="river" id="river2"></div>
+            </article>
+            <article class="opponent">
+              <div class="name">CPU 右</div>
+              <div class="concealed" id="cpu3Hand"></div>
+              <div class="river" id="river3"></div>
+            </article>
+          </section>
+
+          <section class="player-area" aria-label="あなたの手牌">
+            <div class="river player-river" id="river0"></div>
+            <div class="hand-row">
+              <div>
+                <span class="mini-label">手牌</span>
+                <div class="hand" id="playerHand"></div>
+              </div>
+              <div class="drawn-slot">
+                <span class="mini-label">ツモ</span>
+                <div id="drawnTileSlot"></div>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <aside class="coach" aria-label="コーチのアドバイス">
+          <div class="coach-header">
+            <h2>コーチのアドバイス</h2>
+            <span id="shantenBadge" class="shanten-badge">分析中</span>
+          </div>
+          <div class="recommend-card">
+            <span id="recommendedTile" class="tile"></span>
+            <div>
+              <span>おすすめ打牌</span>
+              <strong id="recommendedText">分析中</strong>
+            </div>
+          </div>
+          <dl class="advice-list">
+            <div class="advice-item">
+              <dt>その牌を切る理由</dt>
+              <dd id="reasonText"></dd>
+            </div>
+            <div class="advice-item">
+              <dt>今の手が何を作っているか</dt>
+              <dd id="shapeText"></dd>
+            </div>
+            <div class="advice-item">
+              <dt>役の組み合わせ</dt>
+              <dd id="yakuText"></dd>
+            </div>
+            <div class="advice-item">
+              <dt>鳴いてよいか</dt>
+              <dd id="callText"></dd>
+            </div>
+            <div class="advice-item">
+              <dt>どの牌が来たら嬉しいか</dt>
+              <dd>
+                <span id="happyText"></span>
+                <span id="happyTiles" class="happy-tiles"></span>
+              </dd>
+            </div>
+            <div class="advice-item">
+              <dt>初心者向けの短い解説</dt>
+              <dd id="lessonText"></dd>
+            </div>
+          </dl>
+        </aside>
+      </div>
+
+      <aside class="log" aria-label="進行ログ">
+        <h2>ログ</h2>
+        <ol id="logList"></ol>
+      </aside>
+    </main>
+
+    <script>
+      const TILE_DEFS = [
+        { id: "m1", glyph: "🀇", order: 0, suit: "m", rank: 1, name: "一萬" },
+        { id: "m2", glyph: "🀈", order: 1, suit: "m", rank: 2, name: "二萬" },
+        { id: "m3", glyph: "🀉", order: 2, suit: "m", rank: 3, name: "三萬" },
+        { id: "m4", glyph: "🀊", order: 3, suit: "m", rank: 4, name: "四萬" },
+        { id: "m5", glyph: "🀋", order: 4, suit: "m", rank: 5, name: "五萬" },
+        { id: "m6", glyph: "🀌", order: 5, suit: "m", rank: 6, name: "六萬" },
+        { id: "m7", glyph: "🀍", order: 6, suit: "m", rank: 7, name: "七萬" },
+        { id: "m8", glyph: "🀎", order: 7, suit: "m", rank: 8, name: "八萬" },
+        { id: "m9", glyph: "🀏", order: 8, suit: "m", rank: 9, name: "九萬" },
+        { id: "p1", glyph: "🀙", order: 9, suit: "p", rank: 1, name: "一筒" },
+        { id: "p2", glyph: "🀚", order: 10, suit: "p", rank: 2, name: "二筒" },
+        { id: "p3", glyph: "🀛", order: 11, suit: "p", rank: 3, name: "三筒" },
+        { id: "p4", glyph: "🀜", order: 12, suit: "p", rank: 4, name: "四筒" },
+        { id: "p5", glyph: "🀝", order: 13, suit: "p", rank: 5, name: "五筒" },
+        { id: "p6", glyph: "🀞", order: 14, suit: "p", rank: 6, name: "六筒" },
+        { id: "p7", glyph: "🀟", order: 15, suit: "p", rank: 7, name: "七筒" },
+        { id: "p8", glyph: "🀠", order: 16, suit: "p", rank: 8, name: "八筒" },
+        { id: "p9", glyph: "🀡", order: 17, suit: "p", rank: 9, name: "九筒" },
+        { id: "s1", glyph: "🀐", order: 18, suit: "s", rank: 1, name: "一索" },
+        { id: "s2", glyph: "🀑", order: 19, suit: "s", rank: 2, name: "二索" },
+        { id: "s3", glyph: "🀒", order: 20, suit: "s", rank: 3, name: "三索" },
+        { id: "s4", glyph: "🀓", order: 21, suit: "s", rank: 4, name: "四索" },
+        { id: "s5", glyph: "🀔", order: 22, suit: "s", rank: 5, name: "五索" },
+        { id: "s6", glyph: "🀕", order: 23, suit: "s", rank: 6, name: "六索" },
+        { id: "s7", glyph: "🀖", order: 24, suit: "s", rank: 7, name: "七索" },
+        { id: "s8", glyph: "🀗", order: 25, suit: "s", rank: 8, name: "八索" },
+        { id: "s9", glyph: "🀘", order: 26, suit: "s", rank: 9, name: "九索" },
+        { id: "east", glyph: "🀀", order: 27, suit: "z", rank: 1, name: "東" },
+        { id: "south", glyph: "🀁", order: 28, suit: "z", rank: 2, name: "南" },
+        { id: "west", glyph: "🀂", order: 29, suit: "z", rank: 3, name: "西" },
+        { id: "north", glyph: "🀃", order: 30, suit: "z", rank: 4, name: "北" },
+        { id: "white", glyph: "🀆", order: 31, suit: "z", rank: 5, name: "白" },
+        { id: "green", glyph: "🀅", order: 32, suit: "z", rank: 6, name: "發" },
+        { id: "red", glyph: "🀄", order: 33, suit: "z", rank: 7, name: "中" },
+      ];
+
+      const PLAYERS = ["あなた", "CPU 左", "CPU 対面", "CPU 右"];
+      const YAKU = {
+        riichi: "リーチ（鳴かずにテンパイして宣言する役）",
+        tanyao: "タンヤオ（1・9・字牌を使わない役）",
+        pinfu: "ピンフ（順子4つと役牌ではない頭で作る役）",
+        yakuhai: "役牌（三元牌や自風・場風の刻子で作る役）",
+        ippatsu: "一発（リーチ後、自分の次のツモまでに和了する役）",
+        chiitoi: "七対子（同じ牌のペアを7組そろえる役）",
+        dora: (count) => `ドラ${count}（ドラ牌を${count}枚持っている点数ボーナス）`,
+      };
+
+      const $ = (id) => document.getElementById(id);
+      const tileById = Object.fromEntries(TILE_DEFS.map((tile) => [tile.id, tile]));
+      let state;
+
+      function buildWall() {
+        const wall = [];
+        for (const tile of TILE_DEFS) {
+          for (let i = 0; i < 4; i += 1) wall.push(tile.id);
+        }
+        for (let i = wall.length - 1; i > 0; i -= 1) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [wall[i], wall[j]] = [wall[j], wall[i]];
+        }
+        return wall;
+      }
+
+      function newRound() {
+        const wall = buildWall();
+        const doraIndicator = wall.pop();
+        state = {
+          wall,
+          doraIndicator,
+          dora: getDoraFromIndicator(doraIndicator),
+          hands: [[], [], [], []],
+          rivers: [[], [], [], []],
+          scores: [25000, 25000, 25000, 25000],
+          turn: 0,
+          drawnIndex: null,
+          busy: false,
+          ended: false,
+          riichiDeclared: false,
+          ippatsuLive: false,
+          playerDiscardsSinceRiichi: 0,
+          advice: null,
+          log: [],
+        };
+
+        for (let draw = 0; draw < 13; draw += 1) {
+          for (let player = 0; player < 4; player += 1) {
+            state.hands[player].push(state.wall.pop());
+          }
+        }
+        sortPlayerHand();
+        drawTile(0);
+        addLog("新しい局を開始しました。まずは孤立した字牌や端牌を探しましょう。");
+        render();
+      }
+
+      function getDoraFromIndicator(id) {
+        const tile = tileById[id];
+        if (tile.suit !== "z") {
+          const rank = tile.rank === 9 ? 1 : tile.rank + 1;
+          return `${tile.suit}${rank}`;
+        }
+        const winds = ["east", "south", "west", "north"];
+        const dragons = ["white", "green", "red"];
+        if (winds.includes(id)) return winds[(winds.indexOf(id) + 1) % winds.length];
+        return dragons[(dragons.indexOf(id) + 1) % dragons.length];
+      }
+
+      function sortPlayerHand() {
+        const drawn = state.drawnIndex === null ? null : state.hands[0][state.drawnIndex];
+        const base = state.hands[0]
+          .filter((_, index) => index !== state.drawnIndex)
+          .sort(tileSort);
+        if (drawn) {
+          state.hands[0] = [...base, drawn];
+          state.drawnIndex = state.hands[0].length - 1;
+        } else {
+          state.hands[0] = base;
+        }
+      }
+
+      function tileSort(a, b) {
+        return tileById[a].order - tileById[b].order;
+      }
+
+      function drawTile(player) {
+        if (!state.wall.length) {
+          endDraw();
+          return;
+        }
+        const tile = state.wall.pop();
+        state.hands[player].push(tile);
+        if (player === 0) {
+          state.drawnIndex = state.hands[0].length - 1;
+        }
+      }
+
+      function discardTile(player, index) {
+        const [tile] = state.hands[player].splice(index, 1);
+        state.rivers[player].push(tile);
+        addLog(`${PLAYERS[player]}が${tileLabel(tile)}を切りました。`);
+        return tile;
+      }
+
+      function playerDiscard(index) {
+        if (state.busy || state.ended || state.turn !== 0 || state.hands[0].length !== 14) return;
+        const discarded = discardTile(0, index);
+        state.drawnIndex = null;
+
+        if (state.riichiDeclared) {
+          state.playerDiscardsSinceRiichi += 1;
+          if (state.playerDiscardsSinceRiichi > 1) state.ippatsuLive = false;
+        }
+
+        const ronWinner = [1, 2, 3].find((player) => canWinWithDiscard(player, discarded));
+        if (ronWinner) {
+          winRound(ronWinner, 0, "ロン");
+          return;
+        }
+
+        state.turn = 1;
+        render("他家が自動でツモ切りします。次のツモでアドバイスが更新されます。");
+        runCpuTurns();
+      }
+
+      function canWinWithDiscard(player, tile) {
+        return isWinningHand([...state.hands[player], tile]);
+      }
+
+      function runCpuTurns() {
+        state.busy = true;
+        setTimeout(() => {
+          for (let player = 1; player < 4; player += 1) {
+            state.turn = player;
+            drawTile(player);
+            if (state.ended) return;
+
+            if (isWinningHand(state.hands[player]) && Math.random() < 0.35) {
+              winRound(player, null, "ツモ");
+              return;
+            }
+
+            discardTile(player, chooseCpuDiscard(player));
+          }
+
+          state.turn = 0;
+          drawTile(0);
+          if (state.ended) return;
+          sortPlayerHand();
+          state.busy = false;
+          render();
+        }, 520);
+      }
+
+      function chooseCpuDiscard(player) {
+        const hand = state.hands[player];
+        const counts = countTiles(hand);
+        const candidates = hand.map((tile, index) => ({
+          index,
+          score: discardValue(tile, counts) + Math.random() * 2.5,
+        }));
+        candidates.sort((a, b) => b.score - a.score);
+        return candidates[0].index;
+      }
+
+      function discardValue(tile, counts) {
+        const order = tileById[tile].order;
+        if (counts[order] >= 2) return -2;
+        if (isHonor(tile)) return isValueHonor(tile) ? 1 : 4;
+        const near = [order - 2, order - 1, order + 1, order + 2].filter((n) => sameSuit(order, n) && counts[n]);
+        return 4 - near.length;
+      }
+
+      function declareRiichi() {
+        if (!canDeclareRiichi()) return;
+        state.riichiDeclared = true;
+        state.ippatsuLive = true;
+        state.playerDiscardsSinceRiichi = 0;
+        addLog(`あなたが${YAKU.riichi}を宣言しました。`);
+        render(`${YAKU.riichi}を宣言しました。テンパイを崩さない牌を切りましょう。`);
+      }
+
+      function declareWin() {
+        if (state.ended || state.turn !== 0 || !isWinningHand(state.hands[0])) return;
+        const yaku = completedYaku(state.hands[0]);
+        if (!yaku.length) {
+          render("形は和了ですが、いまは役がありません。役を作るまで続けましょう。");
+          return;
+        }
+        winRound(0, null, "ツモ");
+      }
+
+      function winRound(winner, loser, method) {
+        state.ended = true;
+        state.busy = false;
+        const yaku = winner === 0 ? completedYaku(state.hands[0]) : [];
+        const gain = method === "ロン" ? 8000 : 2000;
+        if (method === "ロン") {
+          state.scores[winner] += gain;
+          state.scores[loser] -= gain;
+        } else {
+          for (let player = 0; player < 4; player += 1) {
+            if (player !== winner) {
+              state.scores[player] -= gain;
+              state.scores[winner] += gain;
+            }
+          }
+        }
+        const suffix = yaku.length ? ` 役: ${yaku.join("＋")}` : "";
+        addLog(`${PLAYERS[winner]}の${method}。和了です。${suffix}`);
+        render(`${PLAYERS[winner]}の${method}！${suffix || "新局で続けられます。"}`);
+      }
+
+      function endDraw() {
+        state.ended = true;
+        state.busy = false;
+        addLog("牌山が尽きて流局しました。");
+        render("牌山が尽きました。流局です。");
+      }
+
+      function addLog(text) {
+        state.log.unshift(text);
+        state.log = state.log.slice(0, 18);
+      }
+
+      function render(messageOverride) {
+        $("wallCount").textContent = state.wall.length;
+        state.scores.forEach((score, index) => {
+          $(`score${index}`).textContent = score.toLocaleString("ja-JP");
+        });
+
+        state.advice = state.turn === 0 && !state.ended && state.hands[0].length === 14
+          ? analyzePlayerHand()
+          : state.advice;
+
+        renderDora();
+        renderHand();
+        for (let player = 0; player < 4; player += 1) renderRiver(player);
+        for (let player = 1; player < 4; player += 1) renderCpuHand(player);
+
+        const winning = !state.ended && state.turn === 0 && isWinningHand(state.hands[0]);
+        const hasYaku = winning && completedYaku(state.hands[0]).length > 0;
+        $("winButton").disabled = !hasYaku;
+        $("riichiButton").disabled = !canDeclareRiichi();
+        $("message").textContent = messageOverride ?? getMessage(winning, hasYaku);
+        renderAdvice();
+        renderLog();
+      }
+
+      function renderDora() {
+        const indicator = tileById[state.doraIndicator];
+        const dora = tileById[state.dora];
+        $("doraIndicator").textContent = indicator.glyph;
+        $("doraIndicator").title = `ドラ表示牌: ${indicator.name}`;
+        $("doraText").textContent = `ボーナス牌は${dora.name}`;
+
+        const drawn = state.drawnIndex === null ? null : state.hands[0][state.drawnIndex];
+        const drawMini = $("drawTileMini");
+        if (drawn) {
+          drawMini.className = "tile small";
+          drawMini.textContent = tileById[drawn].glyph;
+          $("drawText").textContent = tileById[drawn].name;
+        } else {
+          drawMini.className = "tile small empty";
+          drawMini.textContent = "待ち";
+          $("drawText").textContent = "";
+        }
+      }
+
+      function renderHand() {
+        const hand = $("playerHand");
+        const drawnSlot = $("drawnTileSlot");
+        hand.innerHTML = "";
+        drawnSlot.innerHTML = "";
+        state.hands[0].forEach((id, index) => {
+          const button = createTileButton(id, index);
+          if (index === state.drawnIndex) {
+            button.classList.add("drawn");
+            drawnSlot.append(button);
+          } else {
+            hand.append(button);
+          }
+        });
+      }
+
+      function createTileButton(id, index) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "tile";
+        if (state.advice && state.advice.recommendedId === id) button.classList.add("recommended");
+        button.textContent = tileById[id].glyph;
+        button.title = `${tileById[id].name}を切る`;
+        button.setAttribute("aria-label", `${tileById[id].name}を切る`);
+        button.disabled = state.busy || state.ended || state.turn !== 0 || state.hands[0].length !== 14;
+        button.addEventListener("click", () => playerDiscard(index));
+        return button;
+      }
+
+      function renderRiver(player) {
+        const river = $(`river${player}`);
+        river.innerHTML = "";
+        state.rivers[player].forEach((id) => {
+          const tile = document.createElement("span");
+          tile.className = "tile discarded";
+          tile.textContent = tileById[id].glyph;
+          tile.title = tileById[id].name;
+          river.append(tile);
+        });
+      }
+
+      function renderCpuHand(player) {
+        const hand = $(`cpu${player}Hand`);
+        hand.innerHTML = "";
+        for (let i = 0; i < state.hands[player].length; i += 1) {
+          const back = document.createElement("span");
+          back.className = "back";
+          hand.append(back);
+        }
+      }
+
+      function renderAdvice() {
+        const advice = state.advice;
+        if (!advice) return;
+        $("shantenBadge").textContent = advice.shantenLabel;
+        $("recommendedTile").textContent = tileById[advice.recommendedId].glyph;
+        $("recommendedText").textContent = advice.recommendedText;
+        $("reasonText").textContent = advice.reason;
+        $("shapeText").textContent = advice.shape;
+        $("yakuText").textContent = advice.yakuText;
+        $("callText").textContent = advice.callText;
+        $("happyText").textContent = advice.happyText;
+        $("lessonText").textContent = advice.lesson;
+
+        const happy = $("happyTiles");
+        happy.innerHTML = "";
+        advice.happyTiles.slice(0, 10).forEach((id) => {
+          const tile = document.createElement("span");
+          tile.className = "tile small";
+          tile.textContent = tileById[id].glyph;
+          tile.title = tileById[id].name;
+          happy.append(tile);
+        });
+      }
+
+      function renderLog() {
+        const log = $("logList");
+        log.innerHTML = "";
+        for (const entry of state.log) {
+          const item = document.createElement("li");
+          item.textContent = entry;
+          log.append(item);
+        }
+      }
+
+      function getMessage(winning, hasYaku) {
+        if (state.ended) return "局が終了しました。新局を押すと続けられます。";
+        if (winning && hasYaku) return "和了できます。和了ボタンを押してください。";
+        if (winning) return "形は和了ですが役がありません。役を確認して進めましょう。";
+        if (state.busy) return `${PLAYERS[state.turn]}の番です。`;
+        if (state.riichiDeclared) return `${YAKU.riichi}中です。テンパイを崩さない打牌を選びましょう。`;
+        return "手牌から1枚クリックして打牌してください。";
+      }
+
+      function analyzePlayerHand() {
+        const hand = state.hands[0];
+        const candidates = getDiscardCandidates(hand);
+        candidates.sort((a, b) => b.score - a.score);
+        const best = candidates[0];
+        const routes = identifyYakuRoutes(best.after, best.shanten);
+        const yakuText = routes.length
+          ? `今は${routes.join("＋")}を見ています。`
+          : "まだはっきりした役はありません。まずはつながる数牌を残して、孤立した字牌や1・9から整理しましょう。";
+
+        return {
+          recommendedId: best.tile,
+          recommendedText: `${tileById[best.tile].name}を切る`,
+          shantenLabel: shantenLabel(best.shanten),
+          reason: buildReason(best),
+          shape: describeShape(best.after, best.shanten),
+          yakuText,
+          callText: buildCallAdvice(best.after, routes),
+          happyText: best.happyTiles.length
+            ? `${formatTileNames(best.happyTiles.slice(0, 10))}が来ると手が進みます。`
+            : "今は形を整える段階です。孤立牌を減らすツモがうれしいです。",
+          happyTiles: best.happyTiles,
+          lesson: buildLesson(best, routes),
+        };
+      }
+
+      function getDiscardCandidates(hand) {
+        return hand.map((tile, index) => {
+          const after = hand.filter((_, handIndex) => handIndex !== index);
+          const countsAfter = countTiles(after);
+          const shanten = getShanten(after);
+          const happyTiles = improvingTiles(after, shanten);
+          const routes = identifyYakuRoutes(after, shanten);
+          const score = scoreDiscard(tile, hand, after, shanten, happyTiles, routes);
+          return { tile, index, after, shanten, happyTiles, routes, score };
+        });
+      }
+
+      function scoreDiscard(tile, before, after, shanten, happyTiles, routes) {
+        const countsBefore = countTiles(before);
+        const order = tileById[tile].order;
+        let score = -shanten * 100 + happyTiles.length * 5 + discardValue(tile, countsBefore) * 8;
+        if (tile === state.dora) score -= 28;
+        if (isTerminalOrHonor(tile) && routes.includes(YAKU.tanyao)) score += 18;
+        if (isHonor(tile) && !isValueHonor(tile) && countsBefore[order] === 1) score += 16;
+        if (isValueHonor(tile) && countsBefore[order] >= 2) score -= 20;
+        if (countsBefore[order] >= 2) score -= 10;
+        if (routes.includes(YAKU.riichi)) score += 10;
+        if (routes.includes(YAKU.pinfu)) score += 8;
+        if (routes.some((route) => route.startsWith("ドラ"))) score += 4;
+        if (state.riichiDeclared && shanten > 0) score -= 80;
+        after.forEach((id) => {
+          if (id === state.dora) score += 3;
+        });
+        return score;
+      }
+
+      function buildReason(candidate) {
+        const tile = tileById[candidate.tile];
+        const countBefore = countTiles(state.hands[0])[tile.order];
+        const parts = [];
+        parts.push(`${tile.name}を切ると${shantenLabel(candidate.shanten)}で、受け入れ候補が${candidate.happyTiles.length}種類あります。`);
+        if (isHonor(candidate.tile) && !isValueHonor(candidate.tile) && countBefore === 1) {
+          parts.push("この字牌は1枚だけだと順子にならないため、序盤に整理しやすい牌です。");
+        } else if (isTerminalOrHonor(candidate.tile) && candidate.routes.includes(YAKU.tanyao)) {
+          parts.push(`${YAKU.tanyao}に不要な1・9・字牌を外して、使いやすい2から8の牌を残します。`);
+        } else if (candidate.tile === state.dora) {
+          parts.push("ただし点数ボーナス牌なので、本当は残したい牌です。手の進みが大きく変わるときだけ切ります。");
+        } else if (countBefore >= 2) {
+          parts.push("対子を切る選択なので少し強めですが、ほかの形を優先した方が手が進みます。");
+        } else {
+          parts.push("周りの牌とのつながりが薄く、残した牌の方が順子や対子になりやすい形です。");
+        }
+        return parts.join("");
+      }
+
+      function describeShape(hand, shanten) {
+        const counts = countTiles(hand);
+        const sequences = countSequencePotential(counts);
+        const pairs = counts.filter((count) => count >= 2).length;
+        const yakuhaiPairs = valueHonorPairs(counts);
+        const doraCount = countDora(hand);
+        const base = `${shantenLabel(shanten)}です。`;
+        if (sevenPairsShanten(counts) <= Math.min(shanten, 1) && pairs >= 4) {
+          return `${base} 対子が多いので、${YAKU.chiitoi}も見えます。ペアを壊しすぎないのがコツです。`;
+        }
+        if (yakuhaiPairs.length) {
+          return `${base} ${formatTileNames(yakuhaiPairs)}の対子があり、${YAKU.yakuhai}を軸にできます。`;
+        }
+        if (sequences >= 4) {
+          return `${base} 数牌のつながりが多く、順子を4つ作る門前寄りの手です。${YAKU.riichi}や${YAKU.pinfu}が自然です。`;
+        }
+        if (doraCount > 0) {
+          return `${base} 点数ボーナス牌を${doraCount}枚持っています。役を1つ作れれば${YAKU.dora(doraCount)}で点数が伸びます。`;
+        }
+        return `${base} まだ材料集めの段階です。孤立した牌を減らして、2枚組や連続形を増やしましょう。`;
+      }
+
+      function buildCallAdvice(hand, routes) {
+        const counts = countTiles(hand);
+        const yakuhaiPairs = valueHonorPairs(counts);
+        if (state.riichiDeclared) {
+          return `${YAKU.riichi}中なので鳴けません。ツモかロンを待ちます。`;
+        }
+        if (yakuhaiPairs.length) {
+          return `${formatTileNames(yakuhaiPairs)}が出たらポンしてもよいです。${YAKU.yakuhai}は鳴いても役が残るので、初心者にはわかりやすい攻め方です。`;
+        }
+        if (routes.includes(YAKU.tanyao) && !routes.includes(YAKU.pinfu)) {
+          return `${YAKU.tanyao}は鳴いても成立します。ただし鳴くと${YAKU.riichi}が使えなくなるので、テンパイが近い時だけ鳴きましょう。`;
+        }
+        if (routes.includes(YAKU.pinfu) || routes.includes(YAKU.riichi)) {
+          return `今は門前で進めたい手です。鳴くと${YAKU.riichi}や${YAKU.pinfu}が弱くなるので、基本は鳴かない方がよいです。`;
+        }
+        return "まだ役が決まりきっていません。鳴く前に、鳴いたあとに残る役があるかを確認しましょう。";
+      }
+
+      function buildLesson(candidate, routes) {
+        if (candidate.shanten === 0) {
+          return `テンパイは「あと1枚で和了」の状態です。門前なら${YAKU.riichi}を宣言できるか確認しましょう。`;
+        }
+        if (routes.includes(YAKU.tanyao)) {
+          return `${YAKU.tanyao}は初心者が最初に覚えやすい役です。1・9・字牌を使わず、2から8だけで作ります。`;
+        }
+        if (routes.includes(YAKU.yakuhai)) {
+          return `${YAKU.yakuhai}は対象の字牌を3枚集めるだけで役になります。鳴いても成立するのが強みです。`;
+        }
+        if (candidate.happyTiles.length >= 8) {
+          return "嬉しい牌が多いほど、次のツモで手が進みやすいです。迷ったら受け入れ枚数が多い打牌を選ぶと安定します。";
+        }
+        return "最初は点数よりも形を意識しましょう。孤立牌を切り、連続している数牌と対子を残すと手がまとまります。";
+      }
+
+      function identifyYakuRoutes(hand, shanten) {
+        const counts = countTiles(hand);
+        const routes = [];
+        const terminalHonorCount = hand.filter(isTerminalOrHonor).length;
+        const sequencePotential = countSequencePotential(counts);
+        const doraCount = countDora(hand);
+        const yakuhaiBlocks = valueHonorPairs(counts).length + valueHonorTriples(counts).length;
+        const chiitoi = sevenPairsShanten(counts);
+
+        if (!state.riichiDeclared && shanten <= 1) routes.push(YAKU.riichi);
+        if (state.riichiDeclared) routes.push(YAKU.riichi);
+        if (state.riichiDeclared && state.ippatsuLive) routes.push(YAKU.ippatsu);
+        if (terminalHonorCount === 0 || terminalHonorCount <= 2) routes.push(YAKU.tanyao);
+        if (sequencePotential >= 4 && !valueHonorPairs(counts).length) routes.push(YAKU.pinfu);
+        if (yakuhaiBlocks) routes.push(YAKU.yakuhai);
+        if (doraCount > 0) routes.push(YAKU.dora(doraCount));
+        if (chiitoi <= 1) routes.push(YAKU.chiitoi);
+
+        return [...new Set(routes)].slice(0, 5);
+      }
+
+      function improvingTiles(hand, shanten) {
+        const visible = countVisibleTiles(hand);
+        const result = [];
+        for (const tile of TILE_DEFS) {
+          if (visible[tile.order] >= 4) continue;
+          const next = [...hand, tile.id];
+          if (getShanten(next) < shanten) result.push(tile.id);
+        }
+        return result.sort(tileSort);
+      }
+
+      function countVisibleTiles(hand) {
+        const counts = countTiles(hand);
+        counts[tileById[state.doraIndicator].order] += 1;
+        state.rivers.flat().forEach((id) => {
+          counts[tileById[id].order] += 1;
+        });
+        return counts;
+      }
+
+      function completedYaku(hand) {
+        const result = [];
+        const counts = countTiles(hand);
+        if (state.riichiDeclared) result.push(YAKU.riichi);
+        if (state.riichiDeclared && state.ippatsuLive) result.push(YAKU.ippatsu);
+        if (hand.every((id) => !isTerminalOrHonor(id))) result.push(YAKU.tanyao);
+        if (isLikelyPinfu(counts)) result.push(YAKU.pinfu);
+        if (valueHonorTriples(counts).length) result.push(YAKU.yakuhai);
+        const doraCount = countDora(hand);
+        if (doraCount) result.push(YAKU.dora(doraCount));
+        if (sevenPairsShanten(counts) === -1) result.push(YAKU.chiitoi);
+        return result;
+      }
+
+      function isWinningHand(hand) {
+        if (hand.length % 3 !== 2) return false;
+        const counts = countTiles(hand);
+        if (sevenPairsShanten(counts) === -1) return true;
+
+        for (let i = 0; i < counts.length; i += 1) {
+          if (counts[i] >= 2) {
+            counts[i] -= 2;
+            if (canFormMelds(counts)) {
+              counts[i] += 2;
+              return true;
+            }
+            counts[i] += 2;
+          }
+        }
+        return false;
+      }
+
+      function canFormMelds(counts) {
+        const first = counts.findIndex((count) => count > 0);
+        if (first === -1) return true;
+
+        if (counts[first] >= 3) {
+          counts[first] -= 3;
+          if (canFormMelds(counts)) {
+            counts[first] += 3;
+            return true;
+          }
+          counts[first] += 3;
+        }
+
+        const rank = first % 9;
+        if (first < 27 && rank <= 6 && counts[first + 1] > 0 && counts[first + 2] > 0 && sameSuit(first, first + 2)) {
+          counts[first] -= 1;
+          counts[first + 1] -= 1;
+          counts[first + 2] -= 1;
+          if (canFormMelds(counts)) {
+            counts[first] += 1;
+            counts[first + 1] += 1;
+            counts[first + 2] += 1;
+            return true;
+          }
+          counts[first] += 1;
+          counts[first + 1] += 1;
+          counts[first + 2] += 1;
+        }
+
+        return false;
+      }
+
+      function getShanten(hand) {
+        const counts = countTiles(hand);
+        return Math.min(standardShanten(counts), sevenPairsShanten(counts));
+      }
+
+      function standardShanten(startCounts) {
+        let best = 8;
+        const memo = new Set();
+        const counts = startCounts.slice();
+
+        function dfs(index, melds, taatsu, pair) {
+          while (index < 34 && counts[index] === 0) index += 1;
+          if (index >= 34) {
+            const usableTaatsu = Math.min(taatsu, 4 - melds);
+            best = Math.min(best, 8 - melds * 2 - usableTaatsu - pair);
+            return;
+          }
+
+          const key = `${index}|${melds}|${taatsu}|${pair}|${counts.join("")}`;
+          if (memo.has(key)) return;
+          memo.add(key);
+
+          if (melds < 4 && counts[index] >= 3) {
+            counts[index] -= 3;
+            dfs(index, melds + 1, taatsu, pair);
+            counts[index] += 3;
+          }
+
+          if (melds < 4 && index < 27 && index % 9 <= 6 && counts[index + 1] > 0 && counts[index + 2] > 0) {
+            counts[index] -= 1;
+            counts[index + 1] -= 1;
+            counts[index + 2] -= 1;
+            dfs(index, melds + 1, taatsu, pair);
+            counts[index] += 1;
+            counts[index + 1] += 1;
+            counts[index + 2] += 1;
+          }
+
+          if (!pair && counts[index] >= 2) {
+            counts[index] -= 2;
+            dfs(index, melds, taatsu, 1);
+            counts[index] += 2;
+          }
+
+          if (taatsu < 4 && counts[index] >= 2) {
+            counts[index] -= 2;
+            dfs(index, melds, taatsu + 1, pair);
+            counts[index] += 2;
+          }
+
+          if (taatsu < 4 && index < 27) {
+            if (index % 9 <= 7 && counts[index + 1] > 0) {
+              counts[index] -= 1;
+              counts[index + 1] -= 1;
+              dfs(index, melds, taatsu + 1, pair);
+              counts[index] += 1;
+              counts[index + 1] += 1;
+            }
+            if (index % 9 <= 6 && counts[index + 2] > 0) {
+              counts[index] -= 1;
+              counts[index + 2] -= 1;
+              dfs(index, melds, taatsu + 1, pair);
+              counts[index] += 1;
+              counts[index + 2] += 1;
+            }
+          }
+
+          counts[index] -= 1;
+          dfs(index, melds, taatsu, pair);
+          counts[index] += 1;
+        }
+
+        dfs(0, 0, 0, 0);
+        return best;
+      }
+
+      function sevenPairsShanten(counts) {
+        const pairs = counts.filter((count) => count >= 2).length;
+        const unique = counts.filter((count) => count > 0).length;
+        return 6 - pairs + Math.max(0, 7 - unique);
+      }
+
+      function countTiles(hand) {
+        const counts = Array(34).fill(0);
+        for (const id of hand) counts[tileById[id].order] += 1;
+        return counts;
+      }
+
+      function countDora(hand) {
+        return hand.filter((id) => id === state.dora).length;
+      }
+
+      function countSequencePotential(counts) {
+        let total = 0;
+        for (const base of [0, 9, 18]) {
+          for (let i = base; i <= base + 6; i += 1) {
+            if (counts[i] && counts[i + 1] && counts[i + 2]) total += 1;
+          }
+          for (let i = base; i <= base + 7; i += 1) {
+            if (counts[i] && counts[i + 1]) total += 0.5;
+          }
+          for (let i = base; i <= base + 6; i += 1) {
+            if (counts[i] && counts[i + 2]) total += 0.5;
+          }
+        }
+        return total;
+      }
+
+      function isLikelyPinfu(counts) {
+        return countSequencePotential(counts) >= 4 && !valueHonorPairs(counts).length && !valueHonorTriples(counts).length;
+      }
+
+      function valueHonorPairs(counts) {
+        return ["east", "white", "green", "red"].filter((id) => counts[tileById[id].order] >= 2);
+      }
+
+      function valueHonorTriples(counts) {
+        return ["east", "white", "green", "red"].filter((id) => counts[tileById[id].order] >= 3);
+      }
+
+      function canDeclareRiichi() {
+        if (!state || state.ended || state.busy || state.riichiDeclared || state.turn !== 0 || state.hands[0].length !== 14) return false;
+        return getDiscardCandidates(state.hands[0]).some((candidate) => candidate.shanten === 0);
+      }
+
+      function sameSuit(a, b) {
+        if (b < 0 || b > 26) return false;
+        return Math.floor(a / 9) === Math.floor(b / 9);
+      }
+
+      function isHonor(id) {
+        return tileById[id].suit === "z";
+      }
+
+      function isTerminalOrHonor(id) {
+        const tile = tileById[id];
+        return tile.suit === "z" || tile.rank === 1 || tile.rank === 9;
+      }
+
+      function isValueHonor(id) {
+        return ["east", "white", "green", "red"].includes(id);
+      }
+
+      function shantenLabel(shanten) {
+        if (shanten < 0) return "和了形";
+        if (shanten === 0) return "テンパイ";
+        return `${shanten}向聴`;
+      }
+
+      function tileLabel(id) {
+        const tile = tileById[id];
+        return `${tile.glyph}${tile.name}`;
+      }
+
+      function formatTileNames(ids) {
+        return [...new Set(ids)].sort(tileSort).map((id) => tileById[id].name).join("・");
+      }
+
+      $("newGameButton").addEventListener("click", newRound);
+      $("sortButton").addEventListener("click", () => {
+        if (state.ended || state.busy) return;
+        sortPlayerHand();
+        render();
+      });
+      $("riichiButton").addEventListener("click", declareRiichi);
+      $("winButton").addEventListener("click", declareWin);
+
+      newRound();
+    </script>
+  </body>
+</html>
