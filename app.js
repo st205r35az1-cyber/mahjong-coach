@@ -61,6 +61,7 @@ const TILE_DEFS = [
         "危険度が赤い牌を避けて守備する",
       ];
       let state;
+      let matchState;
       let fightProfile = loadFightProfile();
 
       function buildWall() {
@@ -75,7 +76,32 @@ const TILE_DEFS = [
         return wall;
       }
 
+      function createMatchState() {
+        return {
+          roundWind: "東",
+          handIndex: 0,
+          dealer: 0,
+          honba: 0,
+          scores: [25000, 25000, 25000, 25000],
+          finished: false,
+        };
+      }
+
+      function startMatch() {
+        matchState = createMatchState();
+        startHand("東風戦を開始しました。東一局、親はあなたです。");
+      }
+
       function newRound() {
+        if (!matchState || matchState.finished) {
+          startMatch();
+          return;
+        }
+        startHand();
+      }
+
+      function startHand(messageOverride = "次局を開始しました。") {
+        if (!matchState) matchState = createMatchState();
         const wall = buildWall();
         const doraIndicator = wall.pop();
         state = {
@@ -84,7 +110,8 @@ const TILE_DEFS = [
           dora: getDoraFromIndicator(doraIndicator),
           hands: [[], [], [], []],
           rivers: [[], [], [], []],
-          scores: [25000, 25000, 25000, 25000],
+          scores: matchState.scores.slice(),
+          dealer: matchState.dealer,
           turn: 0,
           drawnIndex: null,
           busy: false,
@@ -102,6 +129,7 @@ const TILE_DEFS = [
           scoreExplanation: null,
           trainingModeName: "通常ランダム",
           trainingModeHelp: "通常のランダム配牌です。普通に対局しながらコーチの助言を確認できます。",
+          practiceMode: false,
           log: [],
         };
 
@@ -112,8 +140,8 @@ const TILE_DEFS = [
         }
         sortPlayerHand();
         drawTile(0);
-        addLog("新しい局を開始しました。まずは孤立した字牌や端牌を探しましょう。");
-        render();
+        addLog(`${roundLabel()}を開始しました。親は${PLAYERS[state.dealer]}です。`);
+        render(messageOverride);
       }
 
       function getDoraFromIndicator(id) {
@@ -409,6 +437,7 @@ const TILE_DEFS = [
         result.payments.forEach((delta, player) => {
           state.scores[player] += delta;
         });
+        advanceMatchAfterHand(winner);
         state.scoreExplanation = result.explanation;
         state.advice = {
           recommendedId: state.hands[winner][0] || "east",
@@ -429,8 +458,15 @@ const TILE_DEFS = [
       function endDraw() {
         state.ended = true;
         state.busy = false;
+        if (matchState && !state.practiceMode) {
+          matchState.scores = state.scores.slice();
+          matchState.dealer = (matchState.dealer + 1) % 4;
+          matchState.handIndex += 1;
+          matchState.honba += 1;
+          if (matchState.handIndex >= 4) matchState.finished = true;
+        }
         addLog("牌山が尽きて流局しました。");
-        render("牌山が尽きました。流局です。");
+        render("牌山が尽きました。流局です。次局へ進むか、対局リセットで最初からやり直せます。");
       }
 
       function addLog(text) {
@@ -448,6 +484,7 @@ const TILE_DEFS = [
           ? analyzePlayerHand()
           : state.advice;
 
+        renderRoundAndSeats();
         renderDora();
         renderHand();
         renderOpenMelds();
@@ -464,6 +501,43 @@ const TILE_DEFS = [
         renderFightProfile();
         renderOpponentAnalysis();
         renderLog();
+      }
+
+      function roundLabel() {
+        if (!matchState) return "東一局";
+        return `${matchState.roundWind}${matchState.handIndex + 1}局 ${matchState.honba}本場`;
+      }
+
+      function renderRoundAndSeats() {
+        if ($("roundText")) {
+          if (state?.practiceMode) {
+            $("roundText").textContent = `練習モード / 親: ${PLAYERS[state.dealer ?? 0]} / ${state.trainingModeName || "練習"}`;
+          } else {
+            $("roundText").textContent = `${roundLabel()} / 親: ${PLAYERS[state.dealer ?? 0]} / 東風戦 全4局`;
+          }
+        }
+        document.querySelectorAll(".seat").forEach((seat, index) => {
+          seat.classList.toggle("current", index === (state?.dealer ?? 0));
+        });
+      }
+
+      function advanceMatchAfterHand(winner) {
+        if (!matchState || state?.practiceMode) return;
+        matchState.scores = state.scores.slice();
+        if (winner === matchState.dealer) {
+          matchState.honba += 1;
+          addLog(`親の${PLAYERS[winner]}が和了したため連荘です。次も${PLAYERS[matchState.dealer]}が親です。`);
+          return;
+        }
+        matchState.dealer = (matchState.dealer + 1) % 4;
+        matchState.handIndex += 1;
+        matchState.honba = 0;
+        if (matchState.handIndex >= 4) {
+          matchState.finished = true;
+          addLog("東風戦が終了しました。続ける場合は対局リセットを押してください。");
+        } else {
+          addLog(`次局は${roundLabel()}、親は${PLAYERS[matchState.dealer]}です。`);
+        }
       }
 
       function renderDora() {
@@ -1131,6 +1205,12 @@ const TILE_DEFS = [
         if ($("trainingExplain")) {
           $("trainingExplain").textContent = `現在の練習：${state?.trainingModeName || "通常ランダム"}。${state?.trainingModeHelp || "練習モードを選ぶと、特定の学習用手牌で開始できます。"}`;
         }
+        if ($("matchExplain")) {
+          const matchText = matchState?.finished
+            ? "東風戦は終了しています。対局リセットで東一局から再開できます。"
+            : `${roundLabel()}進行中。東風戦は東一局〜東四局の全4局です。親が和了すると連荘、子が和了すると親が移ります。`;
+          $("matchExplain").textContent = matchText;
+        }
       }
 
       function leagueLabel(point) {
@@ -1655,7 +1735,7 @@ const TILE_DEFS = [
         const fuInfo = estimateFu(hand, method);
         const limit = limitBasePoints(han, fuInfo.fu);
         const basePoints = limit.base ?? fuInfo.fu * 2 ** (han + 2);
-        const isDealer = winner === 0;
+        const isDealer = winner === (state.dealer ?? 0);
         const payments = [0, 0, 0, 0];
         let displayScore = "";
         let paymentText = "";
@@ -2012,7 +2092,7 @@ const TILE_DEFS = [
 
       function setupScenario(mode) {
         if (mode === "random") {
-          newRound();
+          startMatch();
           return;
         }
         const scenarios = {
@@ -2068,6 +2148,7 @@ const TILE_DEFS = [
           hands: [scenario.hand.slice(), cpuHands[0], cpuHands[1], cpuHands[2]],
           rivers: scenario.rivers ? scenario.rivers.map((river) => river.slice()) : [[], [], [], []],
           scores: [25000, 25000, 25000, 25000],
+          dealer: 0,
           turn: 0,
           drawnIndex: scenario.hand.length - 1,
           busy: false,
@@ -2085,6 +2166,7 @@ const TILE_DEFS = [
           scoreExplanation: null,
           trainingModeName: scenario.name,
           trainingModeHelp: scenario.message,
+          practiceMode: true,
           log: [],
         };
         sortPlayerHand();
@@ -2106,6 +2188,7 @@ const TILE_DEFS = [
       }
 
       $("newGameButton").addEventListener("click", newRound);
+      $("resetMatchButton")?.addEventListener("click", startMatch);
       $("sortButton").addEventListener("click", () => {
         if (state.ended || state.busy) return;
         sortPlayerHand();
@@ -2119,4 +2202,4 @@ const TILE_DEFS = [
       $("resetProfileButton")?.addEventListener("click", resetFightProfile);
       $("forceMyTurnButton")?.addEventListener("click", forcePlayerTurn);
 
-      newRound();
+      startMatch();
