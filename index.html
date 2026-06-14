@@ -434,6 +434,65 @@
         margin-top: 7px;
       }
 
+      .opponent-analysis {
+        border-top: 1px solid rgb(37 48 59 / 18%);
+        margin-top: 16px;
+        padding-top: 14px;
+      }
+
+      .opponent-analysis h2 {
+        color: var(--paper-ink);
+        margin-bottom: 10px;
+      }
+
+      .opponent-cards {
+        display: grid;
+        gap: 10px;
+      }
+
+      .opponent-card {
+        background: rgb(255 255 255 / 78%);
+        border: 1px solid rgb(37 48 59 / 12%);
+        border-left: 5px solid #8ca3af;
+        border-radius: 8px;
+        padding: 11px;
+      }
+
+      .opponent-card.high {
+        border-left-color: #d94848;
+      }
+
+      .opponent-card.medium {
+        border-left-color: #d79b25;
+      }
+
+      .opponent-card.low {
+        border-left-color: #2f8d67;
+      }
+
+      .opponent-card h3 {
+        color: #25303b;
+        font-size: 14px;
+        margin-bottom: 8px;
+      }
+
+      .opponent-card dl {
+        display: grid;
+        gap: 7px;
+      }
+
+      .opponent-card dt {
+        color: #46606d;
+        font-size: 11px;
+        font-weight: 800;
+      }
+
+      .opponent-card dd {
+        color: #25303b;
+        font-size: 13px;
+        line-height: 1.5;
+      }
+
       .log {
         padding: 14px;
       }
@@ -663,6 +722,10 @@
               <dd id="scoreExplainText"></dd>
             </div>
           </dl>
+          <section class="opponent-analysis" aria-label="相手の狙い予想">
+            <h2>相手の狙い予想</h2>
+            <div id="opponentAnalysisList" class="opponent-cards"></div>
+          </section>
         </aside>
       </div>
 
@@ -718,6 +781,10 @@
         yakuhai: "役牌（三元牌や自風・場風の刻子で作る役）",
         ippatsu: "一発（リーチ後、自分の次のツモまでに和了する役）",
         chiitoi: "七対子（同じ牌のペアを7組そろえる役）",
+        honitsu: "混一色（1種類の数牌と字牌だけで作る役）",
+        chinitsu: "清一色（1種類の数牌だけで作る高打点役）",
+        kokushi: "国士無双（1・9・字牌を13種類集め、そのうち1種類を対子にする役）",
+        toitoi: "対々和（すべて刻子で作る役）",
         dora: (count) => `ドラ${count}（ドラ牌を${count}枚持っている点数ボーナス）`,
       };
 
@@ -752,8 +819,11 @@
           busy: false,
           ended: false,
           riichiDeclared: false,
+          riichiPlayers: [false, false, false, false],
           ippatsuLive: false,
           playerDiscardsSinceRiichi: 0,
+          turnNumber: 1,
+          calls: [[], [], [], []],
           lastDiscard: null,
           advice: null,
           scoreExplanation: null,
@@ -858,10 +928,16 @@
               return;
             }
 
+            if (!state.riichiPlayers[player] && getShanten(state.hands[player]) === 0 && Math.random() < 0.18) {
+              state.riichiPlayers[player] = true;
+              addLog(`${PLAYERS[player]}が${YAKU.riichi}を宣言しました。`);
+            }
+
             discardTile(player, chooseCpuDiscard(player));
           }
 
           state.turn = 0;
+          state.turnNumber += 1;
           drawTile(0);
           if (state.ended) return;
           sortPlayerHand();
@@ -892,6 +968,7 @@
       function declareRiichi() {
         if (!canDeclareRiichi()) return;
         state.riichiDeclared = true;
+        state.riichiPlayers[0] = true;
         state.ippatsuLive = true;
         state.playerDiscardsSinceRiichi = 0;
         addLog(`あなたが${YAKU.riichi}を宣言しました。`);
@@ -965,6 +1042,7 @@
         $("riichiButton").disabled = !canDeclareRiichi();
         $("message").textContent = messageOverride ?? getMessage(winning, hasYaku);
         renderAdvice();
+        renderOpponentAnalysis();
         renderLog();
       }
 
@@ -1062,6 +1140,308 @@
           tile.title = tileById[id].name;
           happy.append(tile);
         });
+      }
+
+      function renderOpponentAnalysis() {
+        const container = $("opponentAnalysisList");
+        if (!container) return;
+        container.innerHTML = "";
+        [1, 2, 3].forEach((playerIndex) => {
+          const analysis = analyzeOpponentIntent(playerIndex);
+          const card = document.createElement("article");
+          card.className = `opponent-card ${analysis.levelClass}`;
+          const title = document.createElement("h3");
+          title.textContent = `${PLAYERS[playerIndex]}の狙い予想`;
+          card.append(title);
+
+          const list = document.createElement("dl");
+          [
+            ["推測", analysis.guess],
+            ["根拠", analysis.reason],
+            ["警戒度", analysis.alert],
+            ["危険牌", analysis.dangerTiles],
+            ["安全牌", analysis.safeTiles],
+            ["手牌別危険度", analysis.handDanger],
+            ["初心者向け解説", analysis.lesson],
+          ].forEach(([label, value]) => {
+            const dt = document.createElement("dt");
+            const dd = document.createElement("dd");
+            dt.textContent = label;
+            dd.textContent = value;
+            list.append(dt, dd);
+          });
+          card.append(list);
+          container.append(card);
+        });
+      }
+
+      function analyzeOpponentIntent(playerIndex) {
+        const river = state.rivers[playerIndex];
+        const calls = state.calls[playerIndex] || [];
+        const suitBias = detectSuitBias(river);
+        const tanyao = detectTanyaoPattern(river);
+        const kokushi = detectKokushiPattern(river);
+        const callPattern = detectYakuhaiOrToitoiPattern(calls);
+        const isRiichi = state.riichiPlayers[playerIndex];
+        const dangerEvaluations = uniqueIds(state.hands[0]).map((id) => evaluateTileDanger(id, playerIndex));
+        const dangerous = dangerEvaluations
+          .filter((item) => item.rank === "危険" || item.rank === "やや危険")
+          .sort((a, b) => b.score - a.score);
+        const safe = dangerEvaluations
+          .filter((item) => item.rank === "安全" || item.rank === "やや安全")
+          .sort((a, b) => a.score - b.score);
+        const handDanger = dangerEvaluations
+          .sort((a, b) => tileById[a.tile].order - tileById[b.tile].order)
+          .map((item) => `${tileById[item.tile].name}: ${item.rank}（${item.reason}）`)
+          .join(" / ");
+
+        const guesses = [];
+        const reasons = [];
+        let alertScore = Math.min(2, Math.floor(river.length / 5));
+
+        if (isRiichi) {
+          alertScore += 4;
+          guesses.push(`${YAKU.riichi}しています。待ちは断定できないため、守備を強める場面です。`);
+          reasons.push(`${PLAYERS[playerIndex]}がリーチを宣言しています。`);
+        }
+        if (suitBias.detected) {
+          alertScore += suitBias.alert;
+          guesses.push(`${YAKU.honitsu}や${YAKU.chinitsu}を狙っている可能性があります。`);
+          reasons.push(suitBias.reason);
+        }
+        if (tanyao.detected) {
+          alertScore += 1;
+          guesses.push(`${YAKU.tanyao}を狙っている可能性があります。`);
+          reasons.push(tanyao.reason);
+        }
+        if (kokushi.detected) {
+          alertScore += kokushi.alert;
+          guesses.push(`${YAKU.kokushi}を狙っている可能性があります。`);
+          reasons.push(kokushi.reason);
+        }
+        if (callPattern.detected) {
+          alertScore += callPattern.alert;
+          guesses.push(callPattern.guess);
+          reasons.push(callPattern.reason);
+        }
+
+        if (!guesses.length) {
+          guesses.push("まだ狙いははっきりしません。推測です。");
+          reasons.push(`捨て牌が${river.length}枚で、特定の役に強く偏った情報はまだ少ないです。`);
+        }
+
+        const alert = alertLabel(alertScore);
+        const dangerText = dangerous.length
+          ? dangerous.slice(0, 5).map((item) => `${tileById[item.tile].name}: ${item.rank}（${item.reason}）`).join(" / ")
+          : "今の手牌には、はっきり危険と出る牌は少なめです。ドラ周辺は引き続き注意です。";
+        const safeText = safe.length
+          ? safe.slice(0, 5).map((item) => `${tileById[item.tile].name}: ${item.rank}（${item.reason}）`).join(" / ")
+          : `${PLAYERS[playerIndex]}の現物が自分の手牌に少ないため、完全に安全と言える牌は見つかっていません。`;
+
+        return {
+          guess: `推測：${guesses.join(" ")}`,
+          reason: reasons.join(" "),
+          alert: alert.label,
+          levelClass: alert.className,
+          dangerTiles: dangerText,
+          safeTiles: safeText,
+          handDanger,
+          lesson: buildOpponentLesson(playerIndex, isRiichi, suitBias, tanyao, kokushi),
+        };
+      }
+
+      function detectSuitBias(river) {
+        if (river.length < 5) return { detected: false, alert: 0, reason: "" };
+        const suitCounts = { m: 0, p: 0, s: 0, z: 0 };
+        river.forEach((id) => {
+          suitCounts[tileById[id].suit] += 1;
+        });
+        const numbered = ["m", "p", "s"].map((suit) => ({ suit, count: suitCounts[suit] }));
+        numbered.sort((a, b) => a.count - b.count);
+        const kept = numbered[0];
+        const cutMany = numbered.slice(1).filter((item) => item.count >= 2).length;
+        if (kept.count <= 1 && cutMany >= 1) {
+          return {
+            detected: true,
+            alert: suitCounts.z <= 1 ? 2 : 1,
+            suit: kept.suit,
+            reason: `${suitName(kept.suit)}をほとんど切っておらず、他の色を先に整理しています。特定の色を集めている可能性があります。`,
+          };
+        }
+        return { detected: false, alert: 0, reason: "" };
+      }
+
+      function detectTanyaoPattern(river) {
+        if (river.length < 4) return { detected: false, reason: "" };
+        const terminalHonor = river.filter(isTerminalOrHonor).length;
+        if (terminalHonor >= 3 && terminalHonor / river.length >= 0.55) {
+          return {
+            detected: true,
+            reason: `序盤から1・9・字牌を${terminalHonor}枚切っており、中張牌を残しているように見えます。`,
+          };
+        }
+        return { detected: false, reason: "" };
+      }
+
+      function detectKokushiPattern(river) {
+        if (river.length < 4 || state.turnNumber > 9) return { detected: false, alert: 0, reason: "" };
+        const middle = river.filter((id) => !isTerminalOrHonor(id)).length;
+        const terminalHonor = river.length - middle;
+        if (middle >= 3 && terminalHonor <= 1) {
+          return {
+            detected: true,
+            alert: middle >= 5 ? 2 : 1,
+            reason: `序盤に2〜8の数牌を多く切り、1・9・字牌をあまり切っていません。ただし国士無双はレアなので推測です。`,
+          };
+        }
+        return { detected: false, alert: 0, reason: "" };
+      }
+
+      function detectYakuhaiOrToitoiPattern(calls) {
+        const ponCalls = calls.filter((call) => call.type === "pon");
+        if (ponCalls.length >= 2) {
+          return {
+            detected: true,
+            alert: 3,
+            guess: `${YAKU.toitoi}や${YAKU.yakuhai}を狙っている可能性があります。`,
+            reason: "ポンが複数見えているため、刻子で進める手の可能性があります。",
+          };
+        }
+        if (ponCalls.some((call) => call.tiles.some(isValueHonor))) {
+          return {
+            detected: true,
+            alert: 2,
+            guess: `${YAKU.yakuhai}を狙っている可能性があります。`,
+            reason: "役牌のポンが見えているため、鳴いても役が残る形です。",
+          };
+        }
+        return { detected: false, alert: 0, guess: "", reason: "" };
+      }
+
+      function evaluateTileDanger(tile, targetPlayer) {
+        const reasons = [];
+        let score = state.riichiPlayers[targetPlayer] ? 45 : 16;
+        if (getGenbutsuSafeTiles(targetPlayer).includes(tile)) {
+          return { tile, rank: "安全", score: 0, reason: "現物（相手がすでに切っている牌）なので、その相手にはロンされません。" };
+        }
+
+        const tileInfo = tileById[tile];
+        const suji = getSujiSafety(tile, targetPlayer);
+        const kabe = getKabeSafety(tile);
+        if (state.riichiPlayers[targetPlayer]) reasons.push(`${PLAYERS[targetPlayer]}のリーチに対して現物ではありません`);
+        if (suji.safe) {
+          score -= 13;
+          reasons.push(suji.reason);
+        } else if (tileInfo.suit !== "z" && state.riichiPlayers[targetPlayer]) {
+          score += 14;
+          reasons.push("無筋なのでリーチ後は危険寄りです");
+        }
+        if (kabe.safe) {
+          score -= 10;
+          reasons.push(kabe.reason);
+        }
+        if (tile === state.dora || isNearDora(tile, state.dora)) {
+          score += tile === state.dora ? 28 : 14;
+          reasons.push(tile === state.dora ? "ドラそのものです" : "ドラ周辺の牌です");
+        }
+        if (tileInfo.suit === "z") {
+          const visible = countPublicVisibleTiles()[tileInfo.order];
+          if (visible >= 2) {
+            score -= 10;
+            reasons.push(`${tileInfo.name}が場に${visible}枚見えていて残り枚数が少なめです`);
+          } else {
+            score += isValueHonor(tile) ? 8 : 2;
+            reasons.push(isValueHonor(tile) ? "役牌なので相手の刻子に注意です" : "字牌は相手の対子・刻子に当たることがあります");
+          }
+        }
+        if (isTerminalOrHonor(tile) && !state.riichiPlayers[targetPlayer]) score -= 4;
+
+        return { tile, rank: dangerRank(score), score, reason: reasons.join("。") || "目立つ安全材料も危険材料も少ない牌です。" };
+      }
+
+      function getGenbutsuSafeTiles(targetPlayer) {
+        return uniqueIds(state.rivers[targetPlayer]);
+      }
+
+      function getSujiSafety(tile, targetPlayer) {
+        const info = tileById[tile];
+        if (info.suit === "z") return { safe: false, reason: "" };
+        const river = new Set(state.rivers[targetPlayer]);
+        const related = [info.rank - 3, info.rank + 3]
+          .filter((rank) => rank >= 1 && rank <= 9)
+          .map((rank) => `${info.suit}${rank}`);
+        const passed = related.find((id) => river.has(id));
+        if (passed) {
+          return {
+            safe: true,
+            reason: `${tileById[passed].name}が通っているスジなので少し安全度が上がります。ただしスジは完全な安全ではありません`,
+          };
+        }
+        return { safe: false, reason: "" };
+      }
+
+      function getKabeSafety(tile) {
+        const info = tileById[tile];
+        if (info.suit === "z") return { safe: false, reason: "" };
+        const visible = countPublicVisibleTiles();
+        const wallRanks = [info.rank + 1, info.rank - 2, info.rank - 1, info.rank + 2].filter((rank) => rank >= 1 && rank <= 9);
+        const wall = wallRanks.find((rank) => visible[tileById[`${info.suit}${rank}`].order] >= 4);
+        if (wall) {
+          return {
+            safe: true,
+            reason: `${tileById[`${info.suit}${wall}`].name}が4枚見えている壁で、${info.name}は少し通りやすい可能性があります`,
+          };
+        }
+        return { safe: false, reason: "" };
+      }
+
+      function countPublicVisibleTiles() {
+        const counts = Array(34).fill(0);
+        state.hands[0].forEach((id) => counts[tileById[id].order] += 1);
+        state.rivers.flat().forEach((id) => counts[tileById[id].order] += 1);
+        counts[tileById[state.doraIndicator].order] += 1;
+        state.calls.flat().forEach((call) => {
+          call.tiles.forEach((id) => counts[tileById[id].order] += 1);
+        });
+        return counts;
+      }
+
+      function dangerRank(score) {
+        if (score <= 8) return "安全";
+        if (score <= 22) return "やや安全";
+        if (score <= 39) return "普通";
+        if (score <= 58) return "やや危険";
+        return "危険";
+      }
+
+      function alertLabel(score) {
+        if (score >= 5) return { label: "高", className: "high" };
+        if (score >= 3) return { label: "中", className: "medium" };
+        return { label: "低", className: "low" };
+      }
+
+      function buildOpponentLesson(playerIndex, isRiichi, suitBias, tanyao, kokushi) {
+        if (isRiichi) {
+          return "リーチ後は、まず現物を探します。現物（相手がすでに切っている牌）は、その相手にはロンされない牌です。現物がない時はスジや壁を参考にしますが、完全な安全ではありません。";
+        }
+        if (suitBias.detected) {
+          return "相手が特定の色をあまり切っていない場合、その色を集めている可能性があります。その色やドラ周辺を切る時は少し注意しましょう。";
+        }
+        if (tanyao.detected) {
+          return `1・9・字牌が多く捨てられている時は、${YAKU.tanyao}のように2〜8を集める手が考えられます。中張牌、特にドラ周辺は少し注意です。`;
+        }
+        if (kokushi.detected) {
+          return `${YAKU.kokushi}は珍しい役です。序盤に中張牌ばかり切られている時だけ、1・9・字牌を切る前に少し確認しましょう。`;
+        }
+        return `これは公開情報だけからの推測です。${PLAYERS[playerIndex]}の手牌は見ず、捨て牌・リーチ・ドラ表示牌・場に見えている牌から安全度を考えています。`;
+      }
+
+      function suitName(suit) {
+        return { m: "萬子", p: "筒子", s: "索子", z: "字牌" }[suit];
+      }
+
+      function uniqueIds(ids) {
+        return [...new Set(ids)].sort(tileSort);
       }
 
       function renderLog() {
