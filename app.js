@@ -100,6 +100,8 @@ const TILE_DEFS = [
           lastDiscard: null,
           advice: null,
           scoreExplanation: null,
+          trainingModeName: "通常ランダム",
+          trainingModeHelp: "通常のランダム配牌です。普通に対局しながらコーチの助言を確認できます。",
           log: [],
         };
 
@@ -1126,6 +1128,9 @@ const TILE_DEFS = [
         $("fightLeague").textContent = leagueLabel(fightProfile.leaguePoint);
         $("fightStars").textContent = fightProfile.stars.toLocaleString("ja-JP");
         $("fightMission").textContent = `本日の課題：${DAILY_MISSIONS[todayMissionIndex()]}`;
+        if ($("trainingExplain")) {
+          $("trainingExplain").textContent = `現在の練習：${state?.trainingModeName || "通常ランダム"}。${state?.trainingModeHelp || "練習モードを選ぶと、特定の学習用手牌で開始できます。"}`;
+        }
       }
 
       function leagueLabel(point) {
@@ -2078,11 +2083,26 @@ const TILE_DEFS = [
           lastDiscard: null,
           advice: null,
           scoreExplanation: null,
+          trainingModeName: scenario.name,
+          trainingModeHelp: scenario.message,
           log: [],
         };
         sortPlayerHand();
-        addLog(`${scenario.name}を開始しました。`);
-        render(scenario.message);
+        addLog(`${scenario.name}を開始しました。あなたの番です。手牌または右側のツモ牌から1枚切ってください。`);
+        render(`${scenario.message} 現在はあなたの番です。手牌または右側のツモ牌から1枚切ってください。`);
+      }
+
+      function forcePlayerTurn() {
+        if (!state || state.ended) return;
+        state.pendingCall = null;
+        state.busy = false;
+        state.turn = 0;
+        const targetCount = playerTurnTileCount(0);
+        if (state.hands[0].length < targetCount && state.wall.length) {
+          drawTile(0);
+        }
+        sortPlayerHand();
+        render("自分の番に戻しました。手牌または右側のツモ牌から1枚切ってください。");
       }
 
       $("newGameButton").addEventListener("click", newRound);
@@ -2097,5 +2117,6 @@ const TILE_DEFS = [
         setupScenario($("trainingModeSelect")?.value || "random");
       });
       $("resetProfileButton")?.addEventListener("click", resetFightProfile);
+      $("forceMyTurnButton")?.addEventListener("click", forcePlayerTurn);
 
       newRound();

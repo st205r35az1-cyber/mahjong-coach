@@ -18,15 +18,19 @@
         </div>
         <div class="controls">
           <button id="riichiButton" class="riichi-button" type="button" disabled>リーチ（鳴かずにテンパイして宣言する役）</button>
-          <select id="trainingModeSelect" class="training-select" title="練習したい形を選ぶ">
-            <option value="random">通常ランダム</option>
-            <option value="kokushi">国士無双チャンス</option>
-            <option value="pinfu">ピンフ・リーチ練習</option>
-            <option value="chiitoi">七対子練習</option>
-            <option value="tanyao">タンヤオ練習</option>
-            <option value="defense">相手リーチ守備練習</option>
-          </select>
-          <button id="applyTrainingButton" type="button" title="選んだ練習形で配牌する">練習配置</button>
+          <label class="training-control" title="選ぶと、練習用の手牌に強制配牌します">
+            <span>練習モード</span>
+            <select id="trainingModeSelect" class="training-select">
+              <option value="random">通常ランダム</option>
+              <option value="kokushi">国士無双チャンス</option>
+              <option value="pinfu">ピンフ・リーチ練習</option>
+              <option value="chiitoi">七対子練習</option>
+              <option value="tanyao">タンヤオ練習</option>
+              <option value="defense">相手リーチ守備練習</option>
+            </select>
+          </label>
+          <button id="applyTrainingButton" type="button" title="選んだ練習用の配牌で開始する">選んだ練習を開始</button>
+          <button id="forceMyTurnButton" type="button" title="練習中に操作不能になった時、自分のツモ番へ戻す">自分の番に戻す</button>
           <button id="sortButton" type="button" title="手牌を並べ替える">整列</button>
           <button id="newGameButton" type="button" title="新しい局を始める">新局</button>
         </div>
@@ -138,6 +142,7 @@
               <div><span>勝星</span><strong id="fightStars">0</strong></div>
             </div>
             <p id="fightMission" class="fight-mission">本日の課題を表示します。</p>
+            <p id="trainingExplain" class="training-explain">練習モードを選ぶと、特定の学習用手牌で開始できます。</p>
           </section>
           <dl class="advice-list">
             <div class="advice-item">

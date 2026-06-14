@@ -756,3 +756,31 @@
           grid-template-columns: repeat(6, minmax(24px, 1fr));
         }
       }
+
+
+.training-control {
+  align-items: center;
+  border: 1px solid rgb(255 255 255 / 18%);
+  border-radius: 8px;
+  display: inline-flex;
+  gap: 8px;
+  min-height: 42px;
+  padding: 0 10px;
+  background: rgb(7 38 34 / 90%);
+}
+
+.training-control span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.training-explain {
+  border-top: 1px solid rgb(255 255 255 / 12%);
+  color: #dff7e9;
+  font-size: 13px;
+  line-height: 1.55;
+  margin-top: 10px;
+  padding-top: 10px;
+}
