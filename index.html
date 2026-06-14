@@ -658,6 +658,10 @@
               <dt>初心者向けの短い解説</dt>
               <dd id="lessonText"></dd>
             </div>
+            <div class="advice-item">
+              <dt>点数計算の根拠</dt>
+              <dd id="scoreExplainText"></dd>
+            </div>
           </dl>
         </aside>
       </div>
@@ -750,7 +754,9 @@
           riichiDeclared: false,
           ippatsuLive: false,
           playerDiscardsSinceRiichi: 0,
+          lastDiscard: null,
           advice: null,
+          scoreExplanation: null,
           log: [],
         };
 
@@ -809,6 +815,7 @@
       function discardTile(player, index) {
         const [tile] = state.hands[player].splice(index, 1);
         state.rivers[player].push(tile);
+        state.lastDiscard = { player, tile };
         addLog(`${PLAYERS[player]}が${tileLabel(tile)}を切りました。`);
         return tile;
       }
@@ -904,22 +911,25 @@
       function winRound(winner, loser, method) {
         state.ended = true;
         state.busy = false;
-        const yaku = winner === 0 ? completedYaku(state.hands[0]) : [];
-        const gain = method === "ロン" ? 8000 : 2000;
-        if (method === "ロン") {
-          state.scores[winner] += gain;
-          state.scores[loser] -= gain;
-        } else {
-          for (let player = 0; player < 4; player += 1) {
-            if (player !== winner) {
-              state.scores[player] -= gain;
-              state.scores[winner] += gain;
-            }
-          }
-        }
-        const suffix = yaku.length ? ` 役: ${yaku.join("＋")}` : "";
-        addLog(`${PLAYERS[winner]}の${method}。和了です。${suffix}`);
-        render(`${PLAYERS[winner]}の${method}！${suffix || "新局で続けられます。"}`);
+        const result = calculateScore(winner, loser, method, state.hands[winner]);
+        result.payments.forEach((delta, player) => {
+          state.scores[player] += delta;
+        });
+        state.scoreExplanation = result.explanation;
+        state.advice = {
+          recommendedId: state.hands[winner][0] || "east",
+          recommendedText: "局が終了しました",
+          shantenLabel: "和了",
+          reason: `${PLAYERS[winner]}が${method}で和了しました。`,
+          shape: "和了後は、下の点数計算の根拠を見ると「なぜその点数か」を確認できます。",
+          yakuText: result.yakuText,
+          callText: "局が終わったので鳴き判断はありません。新局で次の練習に進めます。",
+          happyText: "次の局では、役と点数の両方を意識して進めましょう。",
+          happyTiles: [],
+          lesson: "点数は大きく「翻」と「符」で決まります。初心者はまず、役が何翻か、ドラが何枚あるかを見るところから始めると理解しやすいです。",
+        };
+        addLog(`${PLAYERS[winner]}の${method}。${result.displayScore}です。${result.yakuText}`);
+        render(`${PLAYERS[winner]}の${method}！ ${result.displayScore}。点数計算の根拠を右のコーチ欄に出しました。`);
       }
 
       function endDraw() {
@@ -1041,6 +1051,7 @@
         $("callText").textContent = advice.callText;
         $("happyText").textContent = advice.happyText;
         $("lessonText").textContent = advice.lesson;
+        $("scoreExplainText").textContent = state.scoreExplanation || "まだ和了していません。和了すると、役ごとの翻、符の考え方、ロン/ツモの支払いをここに表示します。";
 
         const happy = $("happyTiles");
         happy.innerHTML = "";
@@ -1074,76 +1085,121 @@
 
       function analyzePlayerHand() {
         const hand = state.hands[0];
-        const candidates = getDiscardCandidates(hand);
-        candidates.sort((a, b) => b.score - a.score);
+        const analysis = analyzeHand(hand, state.dora);
+        const candidates = recommendDiscard(hand, state.dora, state.rivers.flat());
         const best = candidates[0];
-        const routes = identifyYakuRoutes(best.after, best.shanten);
-        const yakuText = routes.length
-          ? `今は${routes.join("＋")}を見ています。`
-          : "まだはっきりした役はありません。まずはつながる数牌を残して、孤立した字牌や1・9から整理しましょう。";
+        const yakuPlan = describeYakuPlan(best.after, state.dora);
+        const tenpai = findTenpaiWaits(hand);
+        const callDecision = state.lastDiscard && state.lastDiscard.player !== 0
+          ? evaluateCallDecision(hand, state.lastDiscard.tile, "auto", state.dora)
+          : buildCallAdvice(best.after, yakuPlan.routes);
+        const waitText = describeTenpaiAdvice(tenpai, best);
 
         return {
           recommendedId: best.tile,
           recommendedText: `${tileById[best.tile].name}を切る`,
           shantenLabel: shantenLabel(best.shanten),
-          reason: buildReason(best),
-          shape: describeShape(best.after, best.shanten),
-          yakuText,
-          callText: buildCallAdvice(best.after, routes),
+          reason: buildReason(best, analysis),
+          shape: `${describeShape(best.after, best.shanten)} ${waitText}`,
+          yakuText: yakuPlan.text,
+          callText: callDecision,
           happyText: best.happyTiles.length
             ? `${formatTileNames(best.happyTiles.slice(0, 10))}が来ると手が進みます。`
             : "今は形を整える段階です。孤立牌を減らすツモがうれしいです。",
           happyTiles: best.happyTiles,
-          lesson: buildLesson(best, routes),
+          lesson: buildLesson(best, yakuPlan.routes),
         };
       }
 
-      function getDiscardCandidates(hand) {
+      function analyzeHand(hand, dora) {
+        const counts = countTiles(hand);
+        const shanten = getShanten(hand);
+        const isolated = hand.filter((id) => tileShapeInfo(id, counts, dora).isIsolated);
+        const pairs = TILE_DEFS.filter((tile) => counts[tile.order] >= 2).map((tile) => tile.id);
+        const completeMeldTiles = completedMeldTileIds(counts);
+        const sequenceBlocks = sequenceBlockCount(counts);
+        const twoSided = twoSidedPotential(counts);
+        const closedWaits = closedWaitPotential(counts);
+        const edgeWaits = edgeWaitPotential(counts);
+        return { counts, shanten, isolated, pairs, completeMeldTiles, sequenceBlocks, twoSided, closedWaits, edgeWaits };
+      }
+
+      function recommendDiscard(hand, dora, discards) {
         return hand.map((tile, index) => {
           const after = hand.filter((_, handIndex) => handIndex !== index);
-          const countsAfter = countTiles(after);
           const shanten = getShanten(after);
           const happyTiles = improvingTiles(after, shanten);
           const routes = identifyYakuRoutes(after, shanten);
-          const score = scoreDiscard(tile, hand, after, shanten, happyTiles, routes);
-          return { tile, index, after, shanten, happyTiles, routes, score };
-        });
+          const detail = tileShapeInfo(tile, countTiles(hand), dora);
+          const afterAnalysis = analyzeHand(after, dora);
+          const score = scoreDiscard(tile, hand, after, shanten, happyTiles, routes, detail, afterAnalysis, discards, dora);
+          return { tile, index, after, shanten, happyTiles, routes, score, detail, afterAnalysis };
+        }).sort((a, b) => b.score - a.score);
       }
 
-      function scoreDiscard(tile, before, after, shanten, happyTiles, routes) {
+      function getDiscardCandidates(hand) {
+        return recommendDiscard(hand, state.dora, state.rivers.flat());
+      }
+
+      function scoreDiscard(tile, before, after, shanten, happyTiles, routes, detail, afterAnalysis, discards, dora) {
         const countsBefore = countTiles(before);
         const order = tileById[tile].order;
-        let score = -shanten * 100 + happyTiles.length * 5 + discardValue(tile, countsBefore) * 8;
-        if (tile === state.dora) score -= 28;
+        let score = -shanten * 120 + happyTiles.length * 7 + discardValue(tile, countsBefore) * 8;
+        if (detail.isIsolated) score += 34;
+        if (detail.isHonor && !detail.isValueHonor && detail.count === 1) score += 28;
+        if (detail.isTerminal && detail.count === 1) score += 18;
+        if (detail.isEdgeOnly) score += 12;
+        if (detail.isClosedOnly) score += 8;
+        if (detail.hasTwoSided) score -= 20;
+        if (detail.inCompleteMeld) score -= 36;
+        if (detail.count >= 2) score -= detail.isValueHonor ? 34 : 16;
+        if (tile === dora) score -= 45;
+        if (isNearDora(tile, dora)) score -= 12;
         if (isTerminalOrHonor(tile) && routes.includes(YAKU.tanyao)) score += 18;
-        if (isHonor(tile) && !isValueHonor(tile) && countsBefore[order] === 1) score += 16;
-        if (isValueHonor(tile) && countsBefore[order] >= 2) score -= 20;
-        if (countsBefore[order] >= 2) score -= 10;
+        if (isHonor(tile) && !isValueHonor(tile) && countsBefore[order] === 1) score += 18;
+        if (isValueHonor(tile) && countsBefore[order] >= 2) score -= 24;
         if (routes.includes(YAKU.riichi)) score += 10;
         if (routes.includes(YAKU.pinfu)) score += 8;
         if (routes.some((route) => route.startsWith("ドラ"))) score += 4;
         if (state.riichiDeclared && shanten > 0) score -= 80;
+        if (afterAnalysis.twoSided >= 2) score += 10;
+        if (afterAnalysis.completeMeldTiles.length >= 3) score += 5;
         after.forEach((id) => {
-          if (id === state.dora) score += 3;
+          if (id === dora) score += 3;
         });
         return score;
       }
 
-      function buildReason(candidate) {
+      function buildReason(candidate, analysis) {
         const tile = tileById[candidate.tile];
-        const countBefore = countTiles(state.hands[0])[tile.order];
+        const detail = candidate.detail;
         const parts = [];
         parts.push(`${tile.name}を切ると${shantenLabel(candidate.shanten)}で、受け入れ候補が${candidate.happyTiles.length}種類あります。`);
-        if (isHonor(candidate.tile) && !isValueHonor(candidate.tile) && countBefore === 1) {
-          parts.push("この字牌は1枚だけだと順子にならないため、序盤に整理しやすい牌です。");
+        if (detail.isHonor && !detail.isValueHonor && detail.count === 1) {
+          parts.push(`${tile.name}は字牌で順子にならず、1枚だけなので孤立牌として整理しやすいです。`);
+        } else if (detail.isIsolated && detail.isTerminal) {
+          parts.push(`${tile.name}は端牌で、周辺の牌が少ないため順子になりにくい孤立牌です。`);
+        } else if (detail.isIsolated) {
+          parts.push(`${tile.name}は周辺の牌が薄く、両面待ちに育ちにくい孤立牌です。`);
+        } else if (detail.isEdgeOnly) {
+          parts.push(`${tile.name}はペンチャン寄りの形に絡む牌で、両面待ちに比べると伸びが少し弱いです。`);
+        } else if (detail.isClosedOnly) {
+          parts.push(`${tile.name}はカンチャン寄りの形に絡む牌で、両面待ちより待ちが狭くなりやすいです。`);
         } else if (isTerminalOrHonor(candidate.tile) && candidate.routes.includes(YAKU.tanyao)) {
           parts.push(`${YAKU.tanyao}に不要な1・9・字牌を外して、使いやすい2から8の牌を残します。`);
         } else if (candidate.tile === state.dora) {
           parts.push("ただし点数ボーナス牌なので、本当は残したい牌です。手の進みが大きく変わるときだけ切ります。");
-        } else if (countBefore >= 2) {
+        } else if (detail.count >= 2) {
           parts.push("対子を切る選択なので少し強めですが、ほかの形を優先した方が手が進みます。");
+        } else if (detail.hasTwoSided) {
+          parts.push("両面候補にも絡みますが、他の色の形がより強いため今回は整理候補になっています。");
         } else {
           parts.push("周りの牌とのつながりが薄く、残した牌の方が順子や対子になりやすい形です。");
+        }
+        if (analysis.completeMeldTiles.includes(candidate.tile)) {
+          parts.push("ただし完成している面子に触る打牌なので、実戦では他候補も比べたい場面です。");
+        } else {
+          parts.push("すでに完成している面子は崩しにくい評価にしています。");
         }
         return parts.join("");
       }
@@ -1170,22 +1226,235 @@
         return `${base} まだ材料集めの段階です。孤立した牌を減らして、2枚組や連続形を増やしましょう。`;
       }
 
+      function tileShapeInfo(id, counts, dora) {
+        const tile = tileById[id];
+        const order = tile.order;
+        const count = counts[order];
+        const isHonorTile = isHonor(id);
+        const isTerminal = !isHonorTile && (tile.rank === 1 || tile.rank === 9);
+        const neighbor1 = !isHonorTile && hasSameSuit(counts, order, -1);
+        const neighbor2 = !isHonorTile && hasSameSuit(counts, order, 1);
+        const gap1 = !isHonorTile && hasSameSuit(counts, order, -2);
+        const gap2 = !isHonorTile && hasSameSuit(counts, order, 2);
+        const hasTwoSided = !isHonorTile && (
+          (tile.rank >= 3 && tile.rank <= 7 && neighbor1) ||
+          (tile.rank >= 3 && tile.rank <= 7 && neighbor2)
+        );
+        const isEdgeOnly = !isHonorTile && (
+          (tile.rank === 1 && neighbor2) ||
+          (tile.rank === 2 && neighbor1 && !neighbor2) ||
+          (tile.rank === 8 && neighbor2 && !neighbor1) ||
+          (tile.rank === 9 && neighbor1)
+        );
+        const isClosedOnly = !isHonorTile && !neighbor1 && !neighbor2 && (gap1 || gap2);
+        const isIsolated = count === 1 && (isHonorTile || (!neighbor1 && !neighbor2 && !gap1 && !gap2));
+        return {
+          count,
+          isHonor: isHonorTile,
+          isTerminal,
+          isValueHonor: isValueHonor(id),
+          isIsolated,
+          hasTwoSided,
+          isEdgeOnly,
+          isClosedOnly,
+          inCompleteMeld: completedMeldTileIds(counts).includes(id),
+          isDora: id === dora,
+          isNearDora: isNearDora(id, dora),
+        };
+      }
+
+      function hasSameSuit(counts, order, offset) {
+        const next = order + offset;
+        return sameSuit(order, next) && counts[next] > 0;
+      }
+
+      function completedMeldTileIds(counts) {
+        const result = new Set();
+        for (const tile of TILE_DEFS) {
+          if (counts[tile.order] >= 3) result.add(tile.id);
+        }
+        for (const base of [0, 9, 18]) {
+          for (let order = base; order <= base + 6; order += 1) {
+            if (counts[order] && counts[order + 1] && counts[order + 2]) {
+              result.add(TILE_DEFS[order].id);
+              result.add(TILE_DEFS[order + 1].id);
+              result.add(TILE_DEFS[order + 2].id);
+            }
+          }
+        }
+        return [...result];
+      }
+
+      function sequenceBlockCount(counts) {
+        let blocks = 0;
+        for (const base of [0, 9, 18]) {
+          for (let order = base; order <= base + 7; order += 1) {
+            if (counts[order] && counts[order + 1]) blocks += 1;
+          }
+          for (let order = base; order <= base + 6; order += 1) {
+            if (counts[order] && counts[order + 2]) blocks += 1;
+          }
+        }
+        return blocks;
+      }
+
+      function twoSidedPotential(counts) {
+        let total = 0;
+        for (const base of [0, 9, 18]) {
+          for (let order = base + 1; order <= base + 6; order += 1) {
+            if (counts[order] && counts[order + 1]) total += 1;
+          }
+        }
+        return total;
+      }
+
+      function closedWaitPotential(counts) {
+        let total = 0;
+        for (const base of [0, 9, 18]) {
+          for (let order = base; order <= base + 6; order += 1) {
+            if (counts[order] && counts[order + 2] && !counts[order + 1]) total += 1;
+          }
+        }
+        return total;
+      }
+
+      function edgeWaitPotential(counts) {
+        let total = 0;
+        for (const base of [0, 9, 18]) {
+          if (counts[base] && counts[base + 1] && !counts[base + 2]) total += 1;
+          if (counts[base + 7] && counts[base + 8] && !counts[base + 6]) total += 1;
+        }
+        return total;
+      }
+
+      function isNearDora(id, dora) {
+        const tile = tileById[id];
+        const doraTile = tileById[dora];
+        if (!tile || !doraTile || tile.suit !== doraTile.suit || tile.suit === "z") return false;
+        return Math.abs(tile.rank - doraTile.rank) <= 2;
+      }
+
+      function describeYakuPlan(hand, dora) {
+        const shanten = getShanten(hand);
+        const counts = countTiles(hand);
+        const routes = identifyYakuRoutes(hand, shanten);
+        const terminalHonor = hand.filter(isTerminalOrHonor);
+        const doraCount = countDora(hand);
+        const plan = routes.length
+          ? `役構成：${routes.join("＋")}狙いです。`
+          : "役構成：まだ役は固定せず、まずはリーチ（鳴かずにテンパイして宣言する役）を目指せる形に整えます。";
+        const notes = [];
+        if (terminalHonor.length && routes.includes(YAKU.tanyao)) {
+          notes.push(`補足：今はまだ${formatTileNames(terminalHonor.slice(0, 4))}があるため、${YAKU.tanyao}は確定していません。これらを処理できるとタンヤオ寄りになります。`);
+        }
+        if (valueHonorPairs(counts).length) {
+          notes.push(`補足：${formatTileNames(valueHonorPairs(counts))}の対子があるので、鳴いて${YAKU.yakuhai}にする道もあります。`);
+        }
+        if (doraCount > 0) {
+          notes.push(`補足：${YAKU.dora(doraCount)}があるので、役を1つ作れれば点数が伸びます。`);
+        } else if (hand.some((id) => isNearDora(id, dora))) {
+          notes.push(`補足：ドラ周りの牌があります。直接のドラではなくても、ドラを引いた時に使いやすい形は大切です。`);
+        }
+        return { routes, text: [plan, ...notes].join(" ") };
+      }
+
+      function findTenpaiWaits(hand) {
+        const candidates = recommendDiscard(hand, state.dora, state.rivers.flat()).filter((candidate) => candidate.shanten === 0);
+        const options = candidates.map((candidate) => {
+          const waits = TILE_DEFS
+            .filter((tile) => countVisibleTiles(candidate.after)[tile.order] < 4)
+            .map((tile) => tile.id)
+            .filter((id) => isWinningHand([...candidate.after, id]));
+          return { discard: candidate.tile, waits: [...new Set(waits)].sort(tileSort), candidate };
+        }).filter((option) => option.waits.length);
+        options.sort((a, b) => b.waits.length - a.waits.length || tileById[a.discard].order - tileById[b.discard].order);
+        return {
+          isTenpai: options.length > 0,
+          options,
+          best: options[0] || null,
+        };
+      }
+
+      function describeTenpaiAdvice(tenpai, bestDiscard) {
+        if (!tenpai.isTenpai) return "";
+        const best = tenpai.best;
+        const waits = best.waits;
+        const allTanyao = waits.every((id) => !isTerminalOrHonor(id));
+        const quality = waits.length >= 3
+          ? `${formatTileNames(waits)}の${waits.length}面待ちなので、かなり良い待ちです。`
+          : waits.length === 2
+            ? `${formatTileNames(waits)}の2種類待ちです。悪くない待ちです。`
+            : `${formatTileNames(waits)}だけの待ちなので、少し狭い待ちです。`;
+        const tanyaoNote = allTanyao
+          ? `すべて2〜8の牌なので、${YAKU.tanyao}も崩れません。`
+          : `待ちに1・9・字牌が絡むため、${YAKU.tanyao}狙いでは注意が必要です。`;
+        const riichiText = canDeclareRiichi()
+          ? `現在テンパイしています。待ちは${formatTileNames(waits)}です。${quality}${tanyaoNote} リーチ可能です。おすすめは${tileById[best.discard].name}切りリーチです。`
+          : `現在テンパイしています。待ちは${formatTileNames(waits)}です。${quality}${tanyaoNote}`;
+        return riichiText;
+      }
+
       function buildCallAdvice(hand, routes) {
         const counts = countTiles(hand);
         const yakuhaiPairs = valueHonorPairs(counts);
         if (state.riichiDeclared) {
-          return `${YAKU.riichi}中なので鳴けません。ツモかロンを待ちます。`;
+          return `鳴き判断：${YAKU.riichi}中なので鳴けません。ツモかロンを待ちます。`;
         }
         if (yakuhaiPairs.length) {
-          return `${formatTileNames(yakuhaiPairs)}が出たらポンしてもよいです。${YAKU.yakuhai}は鳴いても役が残るので、初心者にはわかりやすい攻め方です。`;
+          return `鳴き判断：${formatTileNames(yakuhaiPairs)}が出たらポンしてもよいです。${YAKU.yakuhai}は鳴いても役が残るので、初心者にはわかりやすい攻め方です。`;
         }
         if (routes.includes(YAKU.tanyao) && !routes.includes(YAKU.pinfu)) {
-          return `${YAKU.tanyao}は鳴いても成立します。ただし鳴くと${YAKU.riichi}が使えなくなるので、テンパイが近い時だけ鳴きましょう。`;
+          return `鳴き判断：${YAKU.tanyao}は鳴いても成立します。ただし鳴くと${YAKU.riichi}が使えなくなるので、テンパイが近い時だけ鳴きましょう。`;
         }
         if (routes.includes(YAKU.pinfu) || routes.includes(YAKU.riichi)) {
-          return `今は門前で進めたい手です。鳴くと${YAKU.riichi}や${YAKU.pinfu}が弱くなるので、基本は鳴かない方がよいです。`;
+          return `鳴き判断：今は門前で進めたい手です。鳴くと${YAKU.riichi}や${YAKU.pinfu}が弱くなるので、基本は鳴かない方がよいです。`;
         }
-        return "まだ役が決まりきっていません。鳴く前に、鳴いたあとに残る役があるかを確認しましょう。";
+        return "鳴き判断：まだ役が決まりきっていません。鳴く前に、鳴いたあとに残る役があるかを確認しましょう。";
+      }
+
+      function evaluateCallDecision(hand, discardedTile, callType, dora) {
+        const tile = tileById[discardedTile];
+        const baseHand = state.drawnIndex === null
+          ? hand.slice()
+          : hand.filter((_, index) => index !== state.drawnIndex);
+        const counts = countTiles(baseHand);
+        const ponPossible = counts[tile.order] >= 2;
+        const chiOptions = findChiOptions(baseHand, discardedTile);
+        const yakuPlan = describeYakuPlan(baseHand, dora);
+        if (!ponPossible && !chiOptions.length) {
+          return `鳴き判断：直近の${tile.name}は、今の手ではチー・ポンできる形がありません。無理に鳴くより、手牌の形を整えましょう。`;
+        }
+        if (state.riichiDeclared || yakuPlan.routes.includes(YAKU.riichi)) {
+          return `鳴き判断：今は鳴かない方がいいです。理由：鳴くと${YAKU.riichi}ができなくなり、門前で進める価値が高い手だからです。`;
+        }
+        if (isTerminalOrHonor(discardedTile) && yakuPlan.routes.includes(YAKU.tanyao)) {
+          return `鳴き判断：${tile.name}は鳴かない方がよいです。理由：${tile.name}を使うと${YAKU.tanyao}が消えてしまうためです。`;
+        }
+        if (ponPossible && isValueHonor(discardedTile)) {
+          return `鳴き判断：この${tile.name}はポンしてもよいです。理由：${tile.name}をポンすると${YAKU.yakuhai}の刻子ができ、鳴いても役が残るからです。`;
+        }
+        const goodChi = chiOptions.find((option) => option.every((id) => !isTerminalOrHonor(id)));
+        if (goodChi && yakuPlan.routes.includes(YAKU.tanyao)) {
+          return `鳴き判断：この${tile.name}はチーしてもよいです。理由：${formatTileNames(goodChi)}の順子ができ、${YAKU.tanyao}も維持できます。`;
+        }
+        if (chiOptions.length && twoSidedPotential(counts) >= 2) {
+          return `鳴き判断：今は鳴かない方がいいです。理由：手牌に両面候補があり、鳴かずに進めると${YAKU.riichi}を残せるからです。`;
+        }
+        const optionText = chiOptions.length ? `${formatTileNames(chiOptions[0])}の順子` : `${tile.name}の刻子`;
+        return `鳴き判断：鳴いてもよい候補はありますが、急がなくて大丈夫です。理由：${optionText}はできますが、鳴いた後に残る役を確認してから鳴くのが安全です。`;
+      }
+
+      function findChiOptions(hand, discardedTile) {
+        const tile = tileById[discardedTile];
+        if (tile.suit === "z") return [];
+        const ids = new Set(hand);
+        const options = [];
+        for (const ranks of [[tile.rank - 2, tile.rank - 1], [tile.rank - 1, tile.rank + 1], [tile.rank + 1, tile.rank + 2]]) {
+          if (ranks.every((rank) => rank >= 1 && rank <= 9 && ids.has(`${tile.suit}${rank}`))) {
+            options.push([`${tile.suit}${ranks[0]}`, discardedTile, `${tile.suit}${ranks[1]}`].sort(tileSort));
+          }
+        }
+        return options;
       }
 
       function buildLesson(candidate, routes) {
@@ -1246,17 +1515,117 @@
       }
 
       function completedYaku(hand) {
+        return completedYakuDetails(hand).map((detail) => detail.name);
+      }
+
+      function completedYakuDetails(hand) {
         const result = [];
         const counts = countTiles(hand);
-        if (state.riichiDeclared) result.push(YAKU.riichi);
-        if (state.riichiDeclared && state.ippatsuLive) result.push(YAKU.ippatsu);
-        if (hand.every((id) => !isTerminalOrHonor(id))) result.push(YAKU.tanyao);
-        if (isLikelyPinfu(counts)) result.push(YAKU.pinfu);
-        if (valueHonorTriples(counts).length) result.push(YAKU.yakuhai);
+        if (state.riichiDeclared) result.push({ name: YAKU.riichi, han: 1, kind: "yaku" });
+        if (state.riichiDeclared && state.ippatsuLive) result.push({ name: YAKU.ippatsu, han: 1, kind: "yaku" });
+        if (hand.every((id) => !isTerminalOrHonor(id))) result.push({ name: YAKU.tanyao, han: 1, kind: "yaku" });
+        if (isLikelyPinfu(counts)) result.push({ name: YAKU.pinfu, han: 1, kind: "yaku" });
+        if (valueHonorTriples(counts).length) result.push({ name: YAKU.yakuhai, han: 1, kind: "yaku" });
         const doraCount = countDora(hand);
-        if (doraCount) result.push(YAKU.dora(doraCount));
-        if (sevenPairsShanten(counts) === -1) result.push(YAKU.chiitoi);
+        if (doraCount) result.push({ name: YAKU.dora(doraCount), han: doraCount, kind: "dora" });
+        if (sevenPairsShanten(counts) === -1) result.push({ name: YAKU.chiitoi, han: 2, kind: "yaku" });
         return result;
+      }
+
+      function calculateScore(winner, loser, method, hand) {
+        let details = completedYakuDetails(hand);
+        const hasRealYaku = details.some((detail) => detail.kind === "yaku");
+        if (!hasRealYaku) {
+          details = [{ name: "練習用和了（CPU用の簡易判定）", han: 1, kind: "yaku" }, ...details];
+        }
+        const han = details.reduce((sum, detail) => sum + detail.han, 0);
+        const fuInfo = estimateFu(hand, method);
+        const limit = limitBasePoints(han, fuInfo.fu);
+        const basePoints = limit.base ?? fuInfo.fu * 2 ** (han + 2);
+        const isDealer = winner === 0;
+        const payments = [0, 0, 0, 0];
+        let displayScore = "";
+        let paymentText = "";
+
+        if (method === "ロン") {
+          const ron = ceilHundred(basePoints * (isDealer ? 6 : 4));
+          payments[winner] += ron;
+          payments[loser] -= ron;
+          displayScore = `${ron.toLocaleString("ja-JP")}点`;
+          paymentText = `${PLAYERS[loser]}が${PLAYERS[winner]}へ${ron.toLocaleString("ja-JP")}点を支払います。`;
+        } else if (isDealer) {
+          const each = ceilHundred(basePoints * 2);
+          for (let player = 0; player < 4; player += 1) {
+            if (player !== winner) {
+              payments[player] -= each;
+              payments[winner] += each;
+            }
+          }
+          displayScore = `${each.toLocaleString("ja-JP")}点オール`;
+          paymentText = `親のツモなので、他の3人がそれぞれ${each.toLocaleString("ja-JP")}点を支払います。`;
+        } else {
+          const childPay = ceilHundred(basePoints);
+          const dealerPay = ceilHundred(basePoints * 2);
+          for (let player = 0; player < 4; player += 1) {
+            if (player === winner) continue;
+            const pay = player === 0 ? dealerPay : childPay;
+            payments[player] -= pay;
+            payments[winner] += pay;
+          }
+          displayScore = `${childPay.toLocaleString("ja-JP")} / ${dealerPay.toLocaleString("ja-JP")}点`;
+          paymentText = `子のツモなので、子は${childPay.toLocaleString("ja-JP")}点、親は${dealerPay.toLocaleString("ja-JP")}点を支払います。`;
+        }
+
+        const yakuBreakdown = details.map((detail) => `${detail.name}: ${detail.han}翻`).join("、");
+        const yakuText = `役: ${details.map((detail) => detail.name).join("＋")}`;
+        const limitText = limit.name ? `${limit.name}として扱います。` : `${fuInfo.fu}符${han}翻の基本点から計算します。`;
+        const explanation = [
+          `${yakuBreakdown}。合計${han}翻です。`,
+          `符は${fuInfo.fu}符として計算します。${fuInfo.reason}`,
+          `${limitText}`,
+          paymentText,
+          `ドラ（ドラ牌を持っている点数ボーナス）は翻に足しますが、ドラだけでは和了役にはなりません。`,
+        ].join(" ");
+
+        return { payments, displayScore, explanation, yakuText };
+      }
+
+      function estimateFu(hand, method) {
+        const counts = countTiles(hand);
+        if (sevenPairsShanten(counts) === -1) {
+          return { fu: 25, reason: `${YAKU.chiitoi}は特別に25符で数える形です。` };
+        }
+        if (isLikelyPinfu(counts) && method === "ツモ") {
+          return { fu: 20, reason: `${YAKU.pinfu}のツモは、練習用に20符として見せています。` };
+        }
+        if (isLikelyPinfu(counts) && method === "ロン") {
+          return { fu: 30, reason: `${YAKU.pinfu}のロンは、門前ロンの加符を含めて30符として見せています。` };
+        }
+        const tripletCount = counts.filter((count) => count >= 3).length;
+        const valueTriplets = valueHonorTriples(counts).length;
+        const extraFu = tripletCount * 4 + valueTriplets * 4;
+        const fu = roundUpTen(30 + extraFu);
+        return {
+          fu,
+          reason: `細かい待ちや刻子の符は簡略化し、基本30符に刻子や役牌分を少し足して10符単位に丸めています。`,
+        };
+      }
+
+      function limitBasePoints(han, fu) {
+        if (han >= 13) return { name: "数え役満", base: 8000 };
+        if (han >= 11) return { name: "三倍満", base: 6000 };
+        if (han >= 8) return { name: "倍満", base: 4000 };
+        if (han >= 6) return { name: "跳満", base: 3000 };
+        if (han >= 5 || (han === 4 && fu >= 40) || (han === 3 && fu >= 70)) return { name: "満貫", base: 2000 };
+        return { name: "", base: null };
+      }
+
+      function ceilHundred(value) {
+        return Math.ceil(value / 100) * 100;
+      }
+
+      function roundUpTen(value) {
+        return Math.ceil(value / 10) * 10;
       }
 
       function isWinningHand(hand) {
