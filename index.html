@@ -200,6 +200,42 @@
         background: #27539e;
       }
 
+      .call-panel {
+        align-items: center;
+        border: 1px solid rgb(244 201 93 / 45%);
+        background: rgb(41 31 9 / 82%);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        grid-column: 1 / -1;
+        padding: 12px 14px;
+      }
+
+      .call-panel[hidden] {
+        display: none;
+      }
+
+      .call-panel strong {
+        color: #fff9df;
+        font-size: 14px;
+        line-height: 1.4;
+        margin-right: auto;
+      }
+
+      .call-panel button {
+        background: #633b10;
+      }
+
+      #callButtons {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .call-panel .skip-call {
+        background: rgb(7 38 34 / 90%);
+      }
+
       .main-grid {
         display: grid;
         gap: 14px;
@@ -264,6 +300,31 @@
         grid-template-columns: minmax(0, 1fr) 74px;
       }
 
+      .melds {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-bottom: 12px;
+        min-height: 0;
+      }
+
+      .meld {
+        align-items: center;
+        background: rgb(255 255 255 / 10%);
+        border: 1px solid rgb(255 255 255 / 15%);
+        border-radius: 8px;
+        display: inline-flex;
+        gap: 4px;
+        padding: 6px;
+      }
+
+      .meld-label {
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 800;
+        margin-right: 4px;
+      }
+
       .hand {
         align-items: end;
         display: flex;
@@ -315,6 +376,12 @@
         min-width: 27px;
       }
 
+      .meld .tile {
+        box-shadow: none;
+        font-size: 24px;
+        min-width: 31px;
+      }
+
       .tile.empty {
         background: rgb(255 255 255 / 8%);
         border-color: rgb(255 255 255 / 14%);
@@ -337,6 +404,14 @@
 
       .tile.recommended {
         outline: 4px solid var(--accent);
+      }
+
+      .tile.yaku-focus {
+        outline: 4px solid var(--accent-2);
+      }
+
+      .tile.yaku-blocker {
+        outline: 4px solid var(--danger);
       }
 
       .tile.drawn {
@@ -401,6 +476,40 @@
         display: block;
         font-size: 18px;
         line-height: 1.25;
+      }
+
+      .yaku-candidates {
+        background: rgb(255 255 255 / 70%);
+        border: 1px solid rgb(37 48 59 / 12%);
+        border-radius: 8px;
+        margin-bottom: 12px;
+        padding: 10px 11px;
+      }
+
+      .yaku-candidates h3 {
+        color: #35505f;
+        font-size: 12px;
+        font-weight: 800;
+        margin-bottom: 8px;
+      }
+
+      .yaku-buttons {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      .yaku-buttons button {
+        background: #f4f0e4;
+        border-color: rgb(37 48 59 / 18%);
+        color: #25303b;
+        min-height: 36px;
+        padding: 0 10px;
+      }
+
+      .yaku-buttons button.active {
+        background: #25303b;
+        color: #fff;
       }
 
       .advice-list {
@@ -557,7 +666,8 @@
         }
 
         .message,
-        .win-button {
+        .win-button,
+        .call-panel {
           grid-column: 1 / 4;
         }
 
@@ -640,6 +750,10 @@
         </div>
         <div class="message" id="message">手牌から1枚クリックして打牌してください。</div>
         <button id="winButton" class="win-button" type="button" disabled>和了</button>
+        <div id="callPanel" class="call-panel" hidden>
+          <strong id="callPrompt">鳴けます。</strong>
+          <span id="callButtons"></span>
+        </div>
       </section>
 
       <div class="main-grid">
@@ -664,6 +778,7 @@
 
           <section class="player-area" aria-label="あなたの手牌">
             <div class="river player-river" id="river0"></div>
+            <div id="playerMelds" class="melds" aria-label="あなたの副露"></div>
             <div class="hand-row">
               <div>
                 <span class="mini-label">手牌</span>
@@ -689,6 +804,10 @@
               <strong id="recommendedText">分析中</strong>
             </div>
           </div>
+          <section class="yaku-candidates" aria-label="役候補">
+            <h3>役候補を選んで牌を確認</h3>
+            <div id="yakuCandidateButtons" class="yaku-buttons"></div>
+          </section>
           <dl class="advice-list">
             <div class="advice-item">
               <dt>その牌を切る理由</dt>
@@ -824,6 +943,8 @@
           playerDiscardsSinceRiichi: 0,
           turnNumber: 1,
           calls: [[], [], [], []],
+          pendingCall: null,
+          selectedYakuCandidate: null,
           lastDiscard: null,
           advice: null,
           scoreExplanation: null,
@@ -891,7 +1012,7 @@
       }
 
       function playerDiscard(index) {
-        if (state.busy || state.ended || state.turn !== 0 || state.hands[0].length !== 14) return;
+        if (!canPlayerDiscardNow()) return;
         const discarded = discardTile(0, index);
         state.drawnIndex = null;
 
@@ -915,35 +1036,176 @@
         return isWinningHand([...state.hands[player], tile]);
       }
 
+      function getPlayerCallOptions(fromPlayer, discardedTile) {
+        if (state.riichiDeclared || state.ended || fromPlayer === 0) return [];
+        const options = [];
+        const hand = state.hands[0];
+        const counts = countTiles(hand);
+        const tile = tileById[discardedTile];
+        const ronHand = [...hand, discardedTile];
+        const canRon = state.calls[0].length ? isWinningWithOpen(ronHand, state.calls[0].length) : isWinningHand(ronHand);
+        if (canRon) {
+          const yaku = completedYakuDetails(ronHand, 0).filter((detail) => detail.kind === "yaku");
+          if (yaku.length) {
+            options.push({
+              type: "ron",
+              tiles: [discardedTile],
+              consume: [],
+              label: `ロン ${tile.name}`,
+            });
+          }
+        }
+
+        if (counts[tile.order] >= 2) {
+          options.push({
+            type: "pon",
+            tiles: [discardedTile, discardedTile, discardedTile],
+            consume: [discardedTile, discardedTile],
+            label: `ポン ${tile.name}`,
+          });
+        }
+
+        if (fromPlayer === 3 && tile.suit !== "z") {
+          findChiOptions(hand, discardedTile).forEach((meldTiles) => {
+            const consume = meldTiles.slice();
+            consume.splice(consume.indexOf(discardedTile), 1);
+            if (canConsumeTiles(hand, consume)) {
+              options.push({
+                type: "chi",
+                tiles: meldTiles,
+                consume,
+                label: `チー ${formatTileNames(meldTiles)}`,
+              });
+            }
+          });
+        }
+
+        return options;
+      }
+
+      function performCall(optionIndex) {
+        if (!state.pendingCall) return;
+        const option = state.pendingCall.options[optionIndex];
+        if (!option || !canConsumeTiles(state.hands[0], option.consume)) return;
+
+        const fromPlayer = state.pendingCall.fromPlayer;
+        const calledTile = state.pendingCall.tile;
+        const river = state.rivers[fromPlayer];
+        if (river[river.length - 1] === calledTile) river.pop();
+
+        if (option.type === "ron") {
+          state.hands[0].push(calledTile);
+          state.pendingCall = null;
+          state.turn = 0;
+          state.busy = false;
+          sortPlayerHand();
+          winRound(0, fromPlayer, "ロン");
+          return;
+        }
+
+        removeTilesFromHand(0, option.consume);
+        state.calls[0].push({ type: option.type, tiles: option.tiles.slice().sort(tileSort), from: fromPlayer, called: calledTile });
+        state.pendingCall = null;
+        state.drawnIndex = null;
+        state.turn = 0;
+        state.busy = false;
+        state.riichiDeclared = false;
+        state.ippatsuLive = false;
+        sortPlayerHand();
+        addLog(`あなたが${tileById[calledTile].name}を${option.type === "chi" ? "チー" : "ポン"}しました。`);
+        render(`${option.type === "chi" ? "チー" : "ポン"}しました。鳴いたので${YAKU.riichi}は使えません。手牌から1枚切ってください。`);
+      }
+
+      function skipCall() {
+        if (!state.pendingCall) return;
+        const nextPlayer = state.pendingCall.nextPlayer;
+        state.pendingCall = null;
+        state.busy = true;
+        render("鳴きを見送りました。");
+        setTimeout(() => {
+          if (nextPlayer > 3) startPlayerDrawTurn();
+          else processCpuTurn(nextPlayer);
+        }, 260);
+      }
+
+      function canConsumeTiles(hand, tiles) {
+        const counts = countTiles(hand);
+        return tiles.every((id) => {
+          const order = tileById[id].order;
+          if (counts[order] <= 0) return false;
+          counts[order] -= 1;
+          return true;
+        });
+      }
+
+      function removeTilesFromHand(player, tiles) {
+        tiles.forEach((id) => {
+          const index = state.hands[player].indexOf(id);
+          if (index >= 0) state.hands[player].splice(index, 1);
+        });
+      }
+
+      function playerTurnTileCount(player) {
+        return 14 - (state.calls[player]?.length || 0) * 3;
+      }
+
+      function canPlayerDiscardNow() {
+        return !state.busy
+          && !state.ended
+          && !state.pendingCall
+          && state.turn === 0
+          && state.hands[0].length === playerTurnTileCount(0);
+      }
+
       function runCpuTurns() {
         state.busy = true;
         setTimeout(() => {
-          for (let player = 1; player < 4; player += 1) {
-            state.turn = player;
-            drawTile(player);
-            if (state.ended) return;
-
-            if (isWinningHand(state.hands[player]) && Math.random() < 0.35) {
-              winRound(player, null, "ツモ");
-              return;
-            }
-
-            if (!state.riichiPlayers[player] && getShanten(state.hands[player]) === 0 && Math.random() < 0.18) {
-              state.riichiPlayers[player] = true;
-              addLog(`${PLAYERS[player]}が${YAKU.riichi}を宣言しました。`);
-            }
-
-            discardTile(player, chooseCpuDiscard(player));
-          }
-
-          state.turn = 0;
-          state.turnNumber += 1;
-          drawTile(0);
-          if (state.ended) return;
-          sortPlayerHand();
-          state.busy = false;
-          render();
+          processCpuTurn(1);
         }, 520);
+      }
+
+      function processCpuTurn(player) {
+        if (state.ended) return;
+        if (player > 3) {
+          startPlayerDrawTurn();
+          return;
+        }
+
+        state.turn = player;
+        drawTile(player);
+        if (state.ended) return;
+
+        if (isWinningHand(state.hands[player]) && Math.random() < 0.35) {
+          winRound(player, null, "ツモ");
+          return;
+        }
+
+        if (!state.riichiPlayers[player] && getShanten(state.hands[player]) === 0 && Math.random() < 0.18) {
+          state.riichiPlayers[player] = true;
+          addLog(`${PLAYERS[player]}が${YAKU.riichi}を宣言しました。`);
+        }
+
+        const discarded = discardTile(player, chooseCpuDiscard(player));
+        const callOptions = getPlayerCallOptions(player, discarded);
+        if (callOptions.length) {
+          state.pendingCall = { fromPlayer: player, tile: discarded, options: callOptions, nextPlayer: player + 1 };
+          state.busy = false;
+          render(`${PLAYERS[player]}の${tileById[discarded].name}に反応できます。ロン/チー/ポンするか選んでください。`);
+          return;
+        }
+
+        render(`${PLAYERS[player]}が${tileById[discarded].name}を切りました。`);
+        setTimeout(() => processCpuTurn(player + 1), 280);
+      }
+
+      function startPlayerDrawTurn() {
+        state.turn = 0;
+        state.turnNumber += 1;
+        drawTile(0);
+        if (state.ended) return;
+        sortPlayerHand();
+        state.busy = false;
+        render();
       }
 
       function chooseCpuDiscard(player) {
@@ -976,7 +1238,7 @@
       }
 
       function declareWin() {
-        if (state.ended || state.turn !== 0 || !isWinningHand(state.hands[0])) return;
+        if (state.ended || state.turn !== 0 || !isPlayerWinning(0)) return;
         const yaku = completedYaku(state.hands[0]);
         if (!yaku.length) {
           render("形は和了ですが、いまは役がありません。役を作るまで続けましょう。");
@@ -1027,16 +1289,18 @@
           $(`score${index}`).textContent = score.toLocaleString("ja-JP");
         });
 
-        state.advice = state.turn === 0 && !state.ended && state.hands[0].length === 14
+        state.advice = canPlayerDiscardNow()
           ? analyzePlayerHand()
           : state.advice;
 
         renderDora();
         renderHand();
+        renderOpenMelds();
         for (let player = 0; player < 4; player += 1) renderRiver(player);
         for (let player = 1; player < 4; player += 1) renderCpuHand(player);
+        renderCallPanel();
 
-        const winning = !state.ended && state.turn === 0 && isWinningHand(state.hands[0]);
+        const winning = !state.ended && state.turn === 0 && isPlayerWinning(0);
         const hasYaku = winning && completedYaku(state.hands[0]).length > 0;
         $("winButton").disabled = !hasYaku;
         $("riichiButton").disabled = !canDeclareRiichi();
@@ -1087,10 +1351,13 @@
         button.type = "button";
         button.className = "tile";
         if (state.advice && state.advice.recommendedId === id) button.classList.add("recommended");
+        const marker = getYakuTileMarker(id);
+        if (marker === "focus") button.classList.add("yaku-focus");
+        if (marker === "blocker") button.classList.add("yaku-blocker");
         button.textContent = tileById[id].glyph;
         button.title = `${tileById[id].name}を切る`;
         button.setAttribute("aria-label", `${tileById[id].name}を切る`);
-        button.disabled = state.busy || state.ended || state.turn !== 0 || state.hands[0].length !== 14;
+        button.disabled = !canPlayerDiscardNow();
         button.addEventListener("click", () => playerDiscard(index));
         return button;
       }
@@ -1117,6 +1384,202 @@
         }
       }
 
+      function renderOpenMelds() {
+        const container = $("playerMelds");
+        if (!container) return;
+        container.innerHTML = "";
+        state.calls[0].forEach((call) => {
+          const meld = document.createElement("span");
+          meld.className = "meld";
+          const label = document.createElement("span");
+          label.className = "meld-label";
+          label.textContent = call.type === "chi" ? "チー" : "ポン";
+          meld.append(label);
+          call.tiles.forEach((id) => {
+            const tile = document.createElement("span");
+            tile.className = "tile small";
+            const marker = getYakuTileMarker(id);
+            if (marker === "focus") tile.classList.add("yaku-focus");
+            if (marker === "blocker") tile.classList.add("yaku-blocker");
+            tile.textContent = tileById[id].glyph;
+            tile.title = tileById[id].name;
+            meld.append(tile);
+          });
+          container.append(meld);
+        });
+      }
+
+      function renderCallPanel() {
+        const panel = $("callPanel");
+        const buttons = $("callButtons");
+        if (!panel || !buttons) return;
+        buttons.innerHTML = "";
+        if (!state.pendingCall || state.ended) {
+          panel.hidden = true;
+          return;
+        }
+
+        const tile = tileById[state.pendingCall.tile];
+        $("callPrompt").textContent = `${PLAYERS[state.pendingCall.fromPlayer]}の${tile.name}に反応できます。`;
+        state.pendingCall.options.forEach((option, index) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.textContent = option.label;
+          button.addEventListener("click", () => performCall(index));
+          buttons.append(button);
+        });
+        const skip = document.createElement("button");
+        skip.type = "button";
+        skip.className = "skip-call";
+        skip.textContent = "スキップ";
+        skip.addEventListener("click", skipCall);
+        buttons.append(skip);
+        panel.hidden = false;
+      }
+
+      function renderYakuCandidateButtons() {
+        const container = $("yakuCandidateButtons");
+        if (!container) return;
+        container.innerHTML = "";
+        const candidates = getYakuCandidatesForPlayer();
+        if (!candidates.length) {
+          const text = document.createElement("span");
+          text.textContent = "まずは形を整える段階です。";
+          container.append(text);
+          return;
+        }
+        if (!candidates.some((candidate) => candidate.id === state.selectedYakuCandidate)) {
+          state.selectedYakuCandidate = candidates[0].id;
+        }
+        candidates.forEach((candidate) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.textContent = candidate.label;
+          button.title = candidate.description;
+          if (candidate.id === state.selectedYakuCandidate) button.className = "active";
+          button.addEventListener("click", () => {
+            state.selectedYakuCandidate = candidate.id;
+            render();
+          });
+          container.append(button);
+        });
+      }
+
+      function getYakuTileMarker(tileId) {
+        const candidates = getYakuCandidatesForPlayer();
+        if (!candidates.length) return "";
+        if (!candidates.some((candidate) => candidate.id === state.selectedYakuCandidate)) {
+          state.selectedYakuCandidate = candidates[0].id;
+        }
+        const selected = candidates.find((candidate) => candidate.id === state.selectedYakuCandidate);
+        if (!selected) return "";
+        if (selected.blockerTiles.includes(tileId)) return "blocker";
+        if (selected.focusTiles.includes(tileId)) return "focus";
+        return "";
+      }
+
+      function getYakuCandidatesForPlayer() {
+        if (!state || state.ended) return [];
+        const concealed = state.hands[0] || [];
+        const openTiles = state.calls[0].flatMap((call) => call.tiles);
+        const full = [...concealed, ...openTiles];
+        const counts = countTiles(full);
+        const candidates = [];
+        const open = state.calls[0].length > 0;
+        const shanten = getShanten(concealed);
+        const middleTiles = uniqueIds(full.filter((id) => !isTerminalOrHonor(id)));
+        const terminalHonorTiles = uniqueIds(full.filter(isTerminalOrHonor));
+        const doraRelated = uniqueIds(full.filter((id) => id === state.dora || isNearDora(id, state.dora)));
+
+        if (!open && shanten <= 1) {
+          candidates.push({
+            id: "riichi",
+            label: "リーチ候補",
+            focusTiles: uniqueIds(full.filter((id) => !isHonor(id))),
+            blockerTiles: [],
+            description: YAKU.riichi,
+          });
+        }
+
+        if (middleTiles.length >= 6 || terminalHonorTiles.length <= 3) {
+          candidates.push({
+            id: "tanyao",
+            label: "タンヤオ候補",
+            focusTiles: middleTiles,
+            blockerTiles: terminalHonorTiles,
+            description: YAKU.tanyao,
+          });
+        }
+
+        if (!open && countSequencePotential(counts) >= 3) {
+          candidates.push({
+            id: "pinfu",
+            label: "ピンフ候補",
+            focusTiles: uniqueIds(full.filter((id) => !isHonor(id))),
+            blockerTiles: uniqueIds(full.filter((id) => isValueHonor(id))),
+            description: YAKU.pinfu,
+          });
+        }
+
+        const yakuhaiTiles = uniqueIds(["east", "white", "green", "red"].filter((id) => counts[tileById[id].order] >= 2));
+        if (yakuhaiTiles.length) {
+          candidates.push({
+            id: "yakuhai",
+            label: "役牌候補",
+            focusTiles: yakuhaiTiles,
+            blockerTiles: [],
+            description: YAKU.yakuhai,
+          });
+        }
+
+        if (doraRelated.length) {
+          candidates.push({
+            id: "dora",
+            label: "ドラ周り",
+            focusTiles: doraRelated,
+            blockerTiles: [],
+            description: state.dora ? YAKU.dora(Math.max(1, countDora(full))) : "ドラ周り",
+          });
+        }
+
+        const pairTiles = uniqueIds(TILE_DEFS.filter((tile) => counts[tile.order] >= 2).map((tile) => tile.id));
+        if (!open && pairTiles.length >= 3) {
+          candidates.push({
+            id: "chiitoi",
+            label: "七対子候補",
+            focusTiles: pairTiles,
+            blockerTiles: uniqueIds(full.filter((id) => counts[tileById[id].order] === 1)),
+            description: YAKU.chiitoi,
+          });
+        }
+
+        const suitCandidate = bestSuitCandidate(full);
+        if (suitCandidate) {
+          candidates.push({
+            id: "honitsu",
+            label: `${suitName(suitCandidate.suit)}染め候補`,
+            focusTiles: uniqueIds(full.filter((id) => tileById[id].suit === suitCandidate.suit || tileById[id].suit === "z")),
+            blockerTiles: uniqueIds(full.filter((id) => tileById[id].suit !== suitCandidate.suit && tileById[id].suit !== "z")),
+            description: `${YAKU.honitsu}や${YAKU.chinitsu}`,
+          });
+        }
+
+        return candidates;
+      }
+
+      function bestSuitCandidate(hand) {
+        const counts = { m: 0, p: 0, s: 0 };
+        hand.forEach((id) => {
+          const suit = tileById[id].suit;
+          if (counts[suit] !== undefined) counts[suit] += 1;
+        });
+        const best = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+        if (!best || best[1] < 5) return null;
+        const otherTotal = Object.entries(counts).filter(([suit]) => suit !== best[0]).reduce((sum, [, count]) => sum + count, 0);
+        if (best[1] >= otherTotal + 2) return { suit: best[0], count: best[1] };
+        return null;
+      }
+
       function renderAdvice() {
         const advice = state.advice;
         if (!advice) return;
@@ -1130,6 +1593,7 @@
         $("happyText").textContent = advice.happyText;
         $("lessonText").textContent = advice.lesson;
         $("scoreExplainText").textContent = state.scoreExplanation || "まだ和了していません。和了すると、役ごとの翻、符の考え方、ロン/ツモの支払いをここに表示します。";
+        renderYakuCandidateButtons();
 
         const happy = $("happyTiles");
         happy.innerHTML = "";
@@ -1456,6 +1920,7 @@
 
       function getMessage(winning, hasYaku) {
         if (state.ended) return "局が終了しました。新局を押すと続けられます。";
+        if (state.pendingCall) return "反応できる牌が出ました。ロン/チー/ポンするか、スキップを選んでください。";
         if (winning && hasYaku) return "和了できます。和了ボタンを押してください。";
         if (winning) return "形は和了ですが役がありません。役を確認して進めましょう。";
         if (state.busy) return `${PLAYERS[state.turn]}の番です。`;
@@ -1744,7 +2209,7 @@
           const waits = TILE_DEFS
             .filter((tile) => countVisibleTiles(candidate.after)[tile.order] < 4)
             .map((tile) => tile.id)
-            .filter((id) => isWinningHand([...candidate.after, id]));
+            .filter((id) => state.calls[0].length ? isWinningWithOpen([...candidate.after, id], state.calls[0].length) : isWinningHand([...candidate.after, id]));
           return { discard: candidate.tile, waits: [...new Set(waits)].sort(tileSort), candidate };
         }).filter((option) => option.waits.length);
         options.sort((a, b) => b.waits.length - a.waits.length || tileById[a.discard].order - tileById[b.discard].order);
@@ -1838,6 +2303,9 @@
       }
 
       function buildLesson(candidate, routes) {
+        if (state.calls[0].length > 0) {
+          return `すでに鳴いているので${YAKU.riichi}は使えません。鳴いた後は、${YAKU.tanyao}や${YAKU.yakuhai}のように鳴いても残る役があるかを確認しましょう。`;
+        }
         if (candidate.shanten === 0) {
           return `テンパイは「あと1枚で和了」の状態です。門前なら${YAKU.riichi}を宣言できるか確認しましょう。`;
         }
@@ -1862,14 +2330,15 @@
         const yakuhaiBlocks = valueHonorPairs(counts).length + valueHonorTriples(counts).length;
         const chiitoi = sevenPairsShanten(counts);
 
-        if (!state.riichiDeclared && shanten <= 1) routes.push(YAKU.riichi);
-        if (state.riichiDeclared) routes.push(YAKU.riichi);
-        if (state.riichiDeclared && state.ippatsuLive) routes.push(YAKU.ippatsu);
+        const open = state.calls[0]?.length > 0;
+        if (!open && !state.riichiDeclared && shanten <= 1) routes.push(YAKU.riichi);
+        if (!open && state.riichiDeclared) routes.push(YAKU.riichi);
+        if (!open && state.riichiDeclared && state.ippatsuLive) routes.push(YAKU.ippatsu);
         if (terminalHonorCount === 0 || terminalHonorCount <= 2) routes.push(YAKU.tanyao);
-        if (sequencePotential >= 4 && !valueHonorPairs(counts).length) routes.push(YAKU.pinfu);
+        if (!open && sequencePotential >= 4 && !valueHonorPairs(counts).length) routes.push(YAKU.pinfu);
         if (yakuhaiBlocks) routes.push(YAKU.yakuhai);
         if (doraCount > 0) routes.push(YAKU.dora(doraCount));
-        if (chiitoi <= 1) routes.push(YAKU.chiitoi);
+        if (!open && chiitoi <= 1) routes.push(YAKU.chiitoi);
 
         return [...new Set(routes)].slice(0, 5);
       }
@@ -1895,25 +2364,28 @@
       }
 
       function completedYaku(hand) {
-        return completedYakuDetails(hand).map((detail) => detail.name);
+        return completedYakuDetails(hand, 0).map((detail) => detail.name);
       }
 
-      function completedYakuDetails(hand) {
+      function completedYakuDetails(hand, player = 0) {
         const result = [];
-        const counts = countTiles(hand);
-        if (state.riichiDeclared) result.push({ name: YAKU.riichi, han: 1, kind: "yaku" });
-        if (state.riichiDeclared && state.ippatsuLive) result.push({ name: YAKU.ippatsu, han: 1, kind: "yaku" });
-        if (hand.every((id) => !isTerminalOrHonor(id))) result.push({ name: YAKU.tanyao, han: 1, kind: "yaku" });
-        if (isLikelyPinfu(counts)) result.push({ name: YAKU.pinfu, han: 1, kind: "yaku" });
+        const openTiles = state.calls[player]?.flatMap((call) => call.tiles) || [];
+        const fullHand = [...hand, ...openTiles];
+        const counts = countTiles(fullHand);
+        const open = openTiles.length > 0;
+        if (!open && player === 0 && state.riichiDeclared) result.push({ name: YAKU.riichi, han: 1, kind: "yaku" });
+        if (!open && player === 0 && state.riichiDeclared && state.ippatsuLive) result.push({ name: YAKU.ippatsu, han: 1, kind: "yaku" });
+        if (fullHand.every((id) => !isTerminalOrHonor(id))) result.push({ name: YAKU.tanyao, han: 1, kind: "yaku" });
+        if (!open && isLikelyPinfu(countTiles(hand))) result.push({ name: YAKU.pinfu, han: 1, kind: "yaku" });
         if (valueHonorTriples(counts).length) result.push({ name: YAKU.yakuhai, han: 1, kind: "yaku" });
-        const doraCount = countDora(hand);
+        const doraCount = countDora(fullHand);
         if (doraCount) result.push({ name: YAKU.dora(doraCount), han: doraCount, kind: "dora" });
-        if (sevenPairsShanten(counts) === -1) result.push({ name: YAKU.chiitoi, han: 2, kind: "yaku" });
+        if (!open && sevenPairsShanten(countTiles(hand)) === -1) result.push({ name: YAKU.chiitoi, han: 2, kind: "yaku" });
         return result;
       }
 
       function calculateScore(winner, loser, method, hand) {
-        let details = completedYakuDetails(hand);
+        let details = completedYakuDetails(hand, winner);
         const hasRealYaku = details.some((detail) => detail.kind === "yaku");
         if (!hasRealYaku) {
           details = [{ name: "練習用和了（CPU用の簡易判定）", han: 1, kind: "yaku" }, ...details];
@@ -2023,6 +2495,62 @@
             counts[i] += 2;
           }
         }
+        return false;
+      }
+
+      function isPlayerWinning(player) {
+        const openCount = state.calls[player]?.length || 0;
+        if (!openCount) return isWinningHand(state.hands[player]);
+        return isWinningWithOpen(state.hands[player], openCount);
+      }
+
+      function isWinningWithOpen(hand, openCount) {
+        if (hand.length % 3 !== 2) return false;
+        const neededMelds = 4 - openCount;
+        const counts = countTiles(hand);
+        for (let i = 0; i < counts.length; i += 1) {
+          if (counts[i] >= 2) {
+            counts[i] -= 2;
+            if (canFormMeldsNeeded(counts, neededMelds)) {
+              counts[i] += 2;
+              return true;
+            }
+            counts[i] += 2;
+          }
+        }
+        return false;
+      }
+
+      function canFormMeldsNeeded(counts, needed) {
+        const first = counts.findIndex((count) => count > 0);
+        if (first === -1) return needed === 0;
+        if (needed <= 0) return false;
+
+        if (counts[first] >= 3) {
+          counts[first] -= 3;
+          if (canFormMeldsNeeded(counts, needed - 1)) {
+            counts[first] += 3;
+            return true;
+          }
+          counts[first] += 3;
+        }
+
+        const rank = first % 9;
+        if (first < 27 && rank <= 6 && counts[first + 1] > 0 && counts[first + 2] > 0 && sameSuit(first, first + 2)) {
+          counts[first] -= 1;
+          counts[first + 1] -= 1;
+          counts[first + 2] -= 1;
+          if (canFormMeldsNeeded(counts, needed - 1)) {
+            counts[first] += 1;
+            counts[first + 1] += 1;
+            counts[first + 2] += 1;
+            return true;
+          }
+          counts[first] += 1;
+          counts[first + 1] += 1;
+          counts[first + 2] += 1;
+        }
+
         return false;
       }
 
@@ -2179,7 +2707,7 @@
       }
 
       function canDeclareRiichi() {
-        if (!state || state.ended || state.busy || state.riichiDeclared || state.turn !== 0 || state.hands[0].length !== 14) return false;
+        if (!state || state.ended || state.busy || state.pendingCall || state.calls[0].length > 0 || state.riichiDeclared || state.turn !== 0 || state.hands[0].length !== 14) return false;
         return getDiscardCandidates(state.hands[0]).some((candidate) => candidate.shanten === 0);
       }
 
